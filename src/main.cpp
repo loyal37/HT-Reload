@@ -24,13 +24,14 @@
 #include "log.h"
 #include "objects.h"
 #include "probe.h"
+#include "reload.h"
 #include "resolver.h"
 
 namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.4.1";
+const char kVersion[] = "0.5.0";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -291,6 +292,10 @@ private:
     // HTReload.out.txt. Besides the read-only queries in explore.h:
     //   gc [seconds]            request collections for that long (default 15)
     //   probe <label> [filter]  report on the packages of the mod containers whose path contains `filter`
+    //   engine                  locate the engine functions a reload calls
+    //   calltest                call a harmless script function through the engine
+    //   plan [filter]           list what a reload of those containers would do
+    //   renameload <asset>      WRITES: rename the package holding that asset and load the asset again
     void RunCommands() {
         fs::path path = paths_.moduleDir / L"HTReload.cmd.txt";
         std::error_code error;
@@ -350,6 +355,14 @@ private:
             } else {
                 ProbeSupersededPackages(*objects_, ids, reportPath_, first.empty() ? "手动" : first.c_str());
             }
+        } else if (command == "engine") {
+            reloader_.Resolve(answers);
+        } else if (command == "calltest") {
+            reloader_.CallTest(answers);
+        } else if (command == "plan") {
+            reloader_.Plan(ModPackageIds(first), answers);
+        } else if (command == "renameload") {
+            reloader_.RenameAndLoad(first, answers);
         } else if (!Explore(command, arguments, *image_, *objects_, answers)) {
             answers += "不认识的指令\r\n";
         }
@@ -409,6 +422,7 @@ private:
     uintptr_t collectGarbage_;
     ObjectSystem* objects_;
     Image* image_;
+    Reloader reloader_{*image_, *objects_};
     std::wstring reportPath_ = (paths_.moduleDir / L"HTReload.probe.txt").wstring();
     std::set<std::wstring> handled_;
     std::map<std::wstring, Pending> pending_;

@@ -209,6 +209,40 @@ uint64_t PackageIdFromName(const std::string& name) {
     return CityHash64(reinterpret_cast<const char*>(wide.data()), wide.size() * sizeof(wchar_t));
 }
 
+Superseded FindSuperseded(const ObjectView& view, const std::vector<uint64_t>& packageIds, bool findSlots) {
+    Superseded result;
+    const ArenaVector<ObjectInfo>& objects = view.All();
+    std::vector<uint8_t> superseded(objects.size(), 0);
+    for (size_t i = 0; i < objects.size(); ++i) {
+        int32_t index = static_cast<int32_t>(i);
+        if (objects[i].outer == 0 && std::binary_search(packageIds.begin(), packageIds.end(), PackageIdFromName(view.Name(index)))) {
+            superseded[i] = 1;
+            result.packages.push_back(index);
+        }
+    }
+    std::vector<uint8_t> isTarget(objects.size(), 0);
+    ArenaVector<uintptr_t> targets;
+    for (size_t i = 0; i < objects.size() && !result.packages.empty(); ++i) {
+        int32_t package = view.Outermost(static_cast<int32_t>(i));
+        if (package >= 0 && superseded[package]) {
+            isTarget[i] = 1;
+            result.objects.push_back(static_cast<int32_t>(i));
+            targets.push_back(objects[i].address);
+        }
+    }
+    if (findSlots && !targets.empty()) {
+        ArenaVector<PointerHit> hits;
+        Scan(EngineMemory(objects), targets, hits);
+        for (const PointerHit& hit : hits) {
+            int32_t owner = view.Containing(hit.location);
+            if (owner >= 0 && !isTarget[owner]) {
+                result.slots.push_back({hit.location, owner, result.objects[hit.target]});
+            }
+        }
+    }
+    return result;
+}
+
 void ReportReferences(const ObjectSystem& system, uintptr_t target, std::string& out) {
     ArenaVector<ObjectInfo> objects = system.Snapshot();
     ArenaVector<uintptr_t> targets;

@@ -1,5 +1,8 @@
 #include "game_thread.h"
 
+#include <windows.h>
+
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -38,6 +41,33 @@ bool GameThread_Run(std::function<void()> task) {
         g_tasks.push_back(std::move(task));
     }
     return g_host && g_host->runOnGameThread(Drain, nullptr);
+}
+
+bool GameThread_RunAndWait(std::function<void()> task, unsigned long timeoutMs) {
+    struct State {
+        std::mutex mutex;
+        bool cancelled = false;
+        bool done = false;
+        HANDLE finished = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        ~State() { CloseHandle(finished); }
+    };
+    auto state = std::make_shared<State>();
+    bool queued = GameThread_Run([state, task = std::move(task)] {
+        std::lock_guard lock(state->mutex);
+        if (!state->cancelled) {
+            task();
+            state->done = true;
+        }
+        SetEvent(state->finished);
+    });
+    if (queued) {
+        WaitForSingleObject(state->finished, timeoutMs);
+    }
+    // Taking the lock waits out a task that is running, and the flag stops one that has not started,
+    // so the caller's locals are never touched after this returns.
+    std::lock_guard lock(state->mutex);
+    state->cancelled = true;
+    return state->done;
 }
 
 void GameThread_Clear() {

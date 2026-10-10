@@ -438,6 +438,60 @@ std::vector<std::pair<uint32_t, std::string>> ObjectSystem::FindNames(const std:
     return found;
 }
 
+int32_t ObjectView::IndexOf(uintptr_t address) const {
+    auto it = std::lower_bound(objects_.begin(), objects_.end(), address,
+                               [](const ObjectInfo& object, uintptr_t value) { return object.address < value; });
+    return it != objects_.end() && it->address == address ? static_cast<int32_t>(it - objects_.begin()) : -1;
+}
+
+int32_t ObjectView::Containing(uintptr_t address) const {
+    auto it = std::upper_bound(objects_.begin(), objects_.end(), address,
+                               [](uintptr_t value, const ObjectInfo& object) { return value < object.address; });
+    if (it == objects_.begin()) {
+        return -1;
+    }
+    --it;
+    return address < it->address + it->size ? static_cast<int32_t>(it - objects_.begin()) : -1;
+}
+
+int32_t ObjectView::Outermost(int32_t index) const {
+    for (int depth = 0; index >= 0 && objects_[index].outer != 0 && depth < 64; ++depth) {
+        index = IndexOf(objects_[index].outer);
+    }
+    return index;
+}
+
+std::string ObjectView::Name(int32_t index) const {
+    return index < 0 ? std::string("?") : system_.Name(objects_[index].nameId, objects_[index].nameNumber);
+}
+
+std::string ObjectView::ClassName(int32_t index) const {
+    return index < 0 ? std::string("?") : Name(IndexOf(objects_[index].klass));
+}
+
+std::string ObjectView::Path(int32_t index) const {
+    std::string path;
+    for (int depth = 0; index >= 0 && depth < 32; ++depth) {
+        path = path.empty() ? Name(index) : Name(index) + "." + path;
+        index = objects_[index].outer ? IndexOf(objects_[index].outer) : -1;
+    }
+    return path;
+}
+
+bool ObjectView::IsA(int32_t index, const char* className) const {
+    constexpr size_t kSuperStructOffset = 0x40;  // UStruct::SuperStruct
+    uintptr_t klass = index < 0 ? 0 : objects_[index].klass;
+    for (int depth = 0; klass && depth < 64; ++depth) {
+        if (Name(IndexOf(klass)) == className) {
+            return true;
+        }
+        if (!SafeRead(klass + kSuperStructOffset, &klass, sizeof klass)) {
+            break;
+        }
+    }
+    return false;
+}
+
 ArenaVector<Region> ObjectSystem::TableRanges() const {
     ArenaVector<Region> ranges;
     ObjectArrayHeader header;

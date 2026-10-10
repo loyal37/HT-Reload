@@ -54,3 +54,34 @@ private:
     bool itemPacked_ = false;     // UE_PACK_FUOBJECT_ITEM
     size_t propertiesSizeOffset_ = 0;
 };
+
+// EObjectFlags used here.
+constexpr uint32_t kObjectPublic = 0x01;
+constexpr uint32_t kObjectClassDefault = 0x10;
+constexpr uint32_t kObjectArchetype = 0x20;
+
+// One snapshot of the object table with lookups by address.
+class ObjectView {
+public:
+    explicit ObjectView(const ObjectSystem& system) : system_(system), objects_(system.Snapshot()) {}
+
+    const ArenaVector<ObjectInfo>& All() const { return objects_; }
+    const ObjectInfo& operator[](int32_t index) const { return objects_[index]; }
+
+    // Index of the object at `address`, or -1.
+    int32_t IndexOf(uintptr_t address) const;
+    // Index of the object whose body contains `address`, or -1.
+    int32_t Containing(uintptr_t address) const;
+    // The package an object lives in (itself, for a package).
+    int32_t Outermost(int32_t index) const;
+
+    std::string Name(int32_t index) const;
+    std::string ClassName(int32_t index) const;
+    std::string Path(int32_t index) const;
+    // Whether the object's class is `className` or derives from it.
+    bool IsA(int32_t index, const char* className) const;
+
+private:
+    const ObjectSystem& system_;
+    ArenaVector<ObjectInfo> objects_;
+};
