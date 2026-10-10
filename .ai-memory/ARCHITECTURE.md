@@ -28,6 +28,13 @@
 
 - `main.cpp`：`CoreStart` 启动工作线程。工作线程依次完成定位、目录快照、等游戏线程就绪、每秒轮询。`Watcher` 负责发现新包并发起挂载、请求垃圾回收、执行指令文件。
 - `explore.{h,cpp}`：只读查看指令。能把一个指针解释成“某函数 + 偏移”“主模块数据”“某个对象”或“某对象内部”。
+- `engine.{h,cpp}`：定位并调用重载要用的引擎函数。
+  - `UObject::Rename`：它的日志文字存在一个静态记录里，代码引用的是记录而不是文字本身。先找文字，再找指向文字的指针（即记录），再找引用记录的函数。然后抽样约 400 个对象，看它在虚表第几项，取多数。
+  - `UObject::ProcessEvent`：虚表里开头 0x80 字节内含 `test dword ptr [rdx+偏移], 400h`（判断函数是不是原生函数）的那一项，同样取多数；那个偏移就是 `UFunction::FunctionFlags` 的偏移。
+  - 调用都走对象自己的虚表，所以子类的重写会被正确调到。调用包在 SEH 里。
+- `reload.{h,cpp}`：`Reloader`。`engine`、`calltest`、`plan`、`renameload` 四条指令的实现，以及槽位的分类规则（重设网格、改写、不动）。
+- `ObjectView`（在 `objects.{h,cpp}`）：一次对象表快照加上按地址查找、取名字、取路径、判断类继承。新代码都用它。
+- `tools/ask.ps1`：往运行中的游戏发指令并打印答案。`tools/disasm.ps1`：把 `code` 取回的字节写成汇编数据，用 `ml64` 汇编、`dumpbin /disasm` 反汇编，并把地址换算回游戏里的 RVA。
 - `resolver.{h,cpp}`：在运行中的游戏里定位挂载入口，输出 `MountApi { handleMountPak, pakPlatformFile }`。
 - `image.{h,cpp}`：读取主模块内存。按页保护属性把已提交内存分成可执行、只读、可写三类；提供字节串查找、`lea [rip+disp32]` 引用扫描、函数起点查询（`RtlLookupFunctionEntry` 并跟随链式展开信息）。所有读取都有 SEH 保护。
 - `game_thread.{h,cpp}`：核心一侧的任务队列，通过外壳投递到游戏线程。

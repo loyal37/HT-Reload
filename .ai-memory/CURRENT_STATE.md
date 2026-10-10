@@ -2,52 +2,52 @@
 
 ## HT Reload (2026-10-10)
 
-- **已部署 v0.4.0（外壳 + 核心）**，16:15 前后，游戏关闭时部署到 `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`：
-  - 外壳 `HTReload.asi`，193,024 字节，SHA256 `0F2CB234A023A26F3F73FF09B56D3029C96682535E0D1DB6141916A467EA9720`。
-  - 核心 `HTReload.core.dll`，379,392 字节，SHA256 `8ED2A2F689DFDC9AD775F42DF3BEF04B16F64F51F206F6D4641CA86CC3458037`。
-  - 都与 `build\` 下的产物一致。替身宿主测试通过，包含一次运行中更换核心。**v0.4.0 还没在真游戏里运行过。**
-- v0.4.0 相对 v0.3.3：
-  - 拆成外壳和核心。外壳由 ASI 加载器加载、常驻；核心由外壳加载，文件一变就换上新的，游戏不用关。以后只有外壳改动才需要关游戏。
-  - 新增只读查看指令（`objects`、`obj`、`mem`、`vtable`、`code`、`strref`、`astrref`、`callers`、`names`、`refs`），答案写到 `HTReload.out.txt`。
-  - 去掉了挂载后自动探测和它的提示音，探测只由指令触发。
-- 指令文件用法：在游戏 `Win64` 写 `HTReload.cmd.txt`，每行一条，核心每秒检查、读完即删。日志里每条指令开始和结束各一行（`指令: …`、`指令完成: …`）。探测报告追加到 `HTReload.probe.txt`，其他答案覆盖写入 `HTReload.out.txt`。
-- git：`origin` = `https://github.com/loyal37/HT-Reload`（私有）。v0.3.0 到 v0.4.0 的全部改动合在一个提交 `905f86040d720dd20f410f327b3efff38d3a5eb8` 里，已推送到 `main` 并核对远程一致；之后只有记忆文件的更新提交。没有标签，没有 Release。
-- **用户规定（2026-10-10）：每次改完都要提交，不能攒着。** 见 PROJECT_OVERVIEW 的长期约束。
+- **游戏里运行的是外壳 v0.4.0 + 核心 0.5.0**，目录 `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`：
+  - 外壳 `HTReload.asi`，SHA256 `0F2CB234A023A26F3F73FF09B56D3029C96682535E0D1DB6141916A467EA9720`，16:15 前后游戏关闭时部署，之后没变。
+  - 核心 `HTReload.core.dll`，SHA256 `88A2DCF8CF6DF1A6077CF8DCCD89A9A38833D10E37BEC7A277FC247AD89989D3`，17:16 前后在游戏运行中部署，外壳自动换上。
+- git：`origin` = `https://github.com/loyal37/HT-Reload`（私有）。最新代码提交 `f8d54b1`（核心 0.5.0），已推送；之后只有记忆文件的更新提交。
+- **用户规定：每次改完都要提交，不能攒着。** 见 PROJECT_OVERVIEW 的长期约束。
 
 ## 已在真游戏里确认的事
 
 - 定位、挂载、垃圾回收请求都正常。垃圾回收入口 RVA `0x4406bd0`。
 - **返回登录界面再进入可以完全刷新**，进程不用重启。队伍内切换、换出队伍、传送都不刷新。
-- 对象系统（v0.3.3）：名字池 Blocks RVA `0xfa36e10`；对象表 RVA `0xfb1af80`，条目 0x18 字节；类大小字段偏移 0x58；GEngine 全局 RVA `0xfcc6d90`。对象表要等窗口出现后才存在。
-- **两次真实探测**（报告在 `build\probes\`，`build` 不入库）：
-  - 全进程约 37 万个对象、2.8 万个包。Mod 的 26 个包全部已加载，共 745 个对象，没有一个带 RootSet。扫描 1.2 GB 约 1.1 秒。
-  - 包名前缀 `/Game/Characters/Player/042_Blackbird_1/`。主要资产：`player_042_Blackbird_skin`（SkeletalMesh）、5 个 `MI_mint_042_blackbird_*`、16 张贴图、`Blackbird_1_animbp`、`Blackbird_1_save`、`WBP_NTEPanel`、`BPI_NTEPanelTarget`。
-  - 直接指向骨骼网格的对象：
-    - `HTPlayerAppearance /Game/Characters/Player/042_Blackbird_1/MeshAsset_Player042` +0x80。游戏自己的外观数据资产，不在 Mod 里。
-    - `HTSkeletalMeshComponentBudgeted` +0x5b0 和 +0x5b8，三个组件：关卡里的角色 `Player_042_BlackBird_C_…` 的 `CharacterMesh0`；`/Game/sequence_pack/SkillsAnimation_Live/Blackbird/BP_BlackBirdUltraNormal` 类默认对象的 `CharacterMesh0`；关卡序列 `Blackbird_skill_ultraskill` 里的同名组件模板。
-    - 角色对象 `Player_042_BlackBird_C_…` +0x2950。
-  - 指向材质实例的：16 个 `MaterialInstanceDynamic`，都在角色的 `CharacterMesh0` 下，+0x128 是父材质。
-  - 指向动画蓝图类的：角色组件下的 `Blackbird_1_animbp_C_…` 实例，+0x10 是它的类。
-  - **黑鸟在场上和切换成别的角色之后，这 25 处直接引用逐行相同**（第二次之前先请求了 15 秒垃圾回收）。她的角色对象、组件、动态材质、动画蓝图实例在不出场时照样活在关卡里。
-- 结论：这套模型是黑鸟的主模型，不是可选时装。靠任何切换让游戏放手都行不通，只能原地替换，或者像返回登录那样整个世界重来。
+- 对象系统：名字池 Blocks RVA `0xfa36e10`；对象表 RVA `0xfb1af80`，条目 0x18 字节；类大小字段偏移 0x58；GEngine 全局 RVA `0xfcc6d90`。对象表要等窗口出现后才存在。
+- **外壳和运行中更换核心**（17:02 启动的这次运行）：外壳启动、加载核心、接入游戏线程都正常；部署新核心后不到一秒换上，三次更换都没问题，游戏正常。
+- **指令通道和查看指令**都正常，用 `tools\ask.ps1` 发指令。
+- **引擎入口**（`engine` 指令，抽样约 400 个对象的虚表投票）：
+  - `UObject::Rename` = RVA `0x181e3b0`（大小 0x424），虚表第 46 项（偏移 0x170）。包类重写了它，RVA `0x1845670`，只有 0x13 字节，内容就是调用 `UObject::Rename` 再把返回值转成 bool。
+  - `UObject::ProcessEvent` = RVA `0x18aacd0`（大小 0x3e8），虚表第 76 项（偏移 0x260）。已反汇编核对。
+  - `UFunction` 的布局与原版一致：`FunctionFlags` 0xB0，`NumParms` 0xB4，`ParmsSize` 0xB6，`ReturnValueOffset` 0xB8，`FirstPropertyToInit` 0xC0，`EventGraphFunction` 0xC8，原生函数指针 `Func` 0xD8（用 `CollectGarbage` 的已知入口核对过）。函数对象大小 0xE0。
+  - `FProperty`：`ArrayDim` 0x30，`ElementSize` 0x34，`PropertyFlags` 0x38，`Offset_Internal` 0x44；`FField::Next` 0x18。
+- **试调用成功**（`calltest`）：通过 `ProcessEvent` 调 `KismetSystemLibrary.GetFrameCount`，两次返回 54325 和 54374，间隔半秒，帧号在涨。说明在游戏线程上调用带返回值的引擎脚本函数是通的。
+- **需要的脚本函数对象**都在：
+  - `KismetSystemLibrary.LoadAsset_Blocking`：参数块 0x30 字节，返回值偏移 0x28。参数是软引用（8 字节弱指针缓存 + 包名 8 + 资产名 8 + 子路径字符串 16）。
+  - `SkeletalMeshComponent.SetSkeletalMeshAsset`：参数块 8 字节（新网格指针）。
+  - `SkinnedMeshComponent.SetSkinnedAssetAndUpdate`：参数块 0x10 字节。
+  - `EmptyOverrideMaterials` 不是脚本函数，没有。
+  - 游戏自己有 `/Script/HTGame.ChangeMeshLogicObj.NetMultiCast_SetSkeletalMeshAndAnimClassNextTick`，像是它换模型的正规途径，还没研究。
+- **两次真实探测**（报告在 `build\probes\`）和 **重载计划**（`plan blackbird`）：
+  - 全进程约 37 万个对象。Mod 的 26 个包全部已加载，共 745 个对象，26 个顶层公开资产，没有带 RootSet 的。
+  - 包名前缀 `/Game/Characters/Player/042_Blackbird_1/`。
+  - 其他对象里指向旧对象的槽位共 25 处，计划的处理方式：
+    - 重设网格（1 个组件、2 个槽位）：关卡里角色 `Player_042_BlackBird_C_…` 的 `CharacterMesh0`，+0x5b0 和 +0x5b8。
+    - 改写（6 处）：角色对象 +0x2950；游戏的外观资产 `HTPlayerAppearance …/MeshAsset_Player042` +0x80；大招演出蓝图 `BP_BlackBirdUltraNormal` 默认对象的组件 +0x5b0、+0x5b8；关卡序列 `Blackbird_skill_ultraskill` 里的组件模板 +0x5b0、+0x5b8。
+    - 不动（17 处）：16 个动态材质的父材质槽 +0x128，和动画蓝图实例的类指针 +0x10。它们应当在重设网格后随旧实例一起消失。
+  - 黑鸟在场上和切换成别的角色之后，这些引用完全相同。她的角色对象不出场时照样活在关卡里。
 
-## 原地完全重载的路线（用户 2026-10-10 要求做，尚未实现）
+## 原地完全重载的做法（用户 2026-10-10 要求做）
 
-- 引擎自带的 `ReloadPackages` 不在游戏的可执行文件里（`_DEADPACKAGE`、`Reloading %d Package(s):` 都搜不到）。
-- 加载器里“旧包改名后允许重新加载同名包”的逻辑在：字符串 `Dropping renamed package` 在 RVA `0xb4aeb54`。源码是 `AsyncLoading2.cpp` 的 `FGlobalImportStore::AddPackageRef`，判断条件是记录的原始包名与包对象当前名字不同，不在 `WITH_EDITOR` 里。
-- 游戏里有这些脚本函数的名字：`LoadAsset_Blocking`、`SetSkeletalMesh`、`SetSkinnedAssetAndUpdate`、`SetAnimInstanceClass`。
-- 计划的做法：给 26 个旧包改名 → 加载新版本 → 把指向旧对象的引用换成新对象（关卡里的组件通过重新设置网格来重建渲染状态和后处理动画蓝图实例，其余槽位直接改写）→ 垃圾回收。
-- 还要攻的入口，以及打算怎么找：
-  - 改名：`UObject::Rename` 是虚函数。它里面有日志字符串 `Renaming an object (%s) on top of an existing object (%s) is not allowed`，用 `strref` 找到函数，再在某个没重写它的对象的虚表里找到它的序号，然后对包对象按同一序号调用（包类重写了它）。只改内存里的名字不行，引擎的名字哈希表里会留下悬空指针。
-  - 调用带参数的脚本函数：需要 `UObject::ProcessEvent`（虚函数）。它里面只有 `checkf` 的字符串，Shipping 版多半没有，要靠别的办法定位，比如从调用它的函数里读虚表偏移。
-  - 脚本函数对象里原生函数指针的偏移：用 `CollectGarbage` 这个函数对象标定，它的原生指针已知是 RVA `0x4406bd0`。
-  - 参数布局：读函数对象的属性链，需要先核对属性结构的偏移。
-  - 精确替换容器里的引用：需要按属性反射遍历，不能靠按地址猜。
+- 引擎自带的 `ReloadPackages` 被裁掉了。加载器的“旧包改名后可重新加载同名包”还在（`AsyncLoading2.cpp` 的 `FGlobalImportStore::AddPackageRef`，非编辑器代码）。它丢弃旧包记录时会把旧包对象的包 ID 清掉，所以旧包以后被回收不会误删新包的记录。
+- 步骤：给旧包改名（`Rename`，标志 0x35：不重置加载器、不标脏、不建重定向、非事务）→ 用 `LoadAsset_Blocking` 加载（软引用里的包名和资产名直接取旧对象的名字 ID）→ 组件用 `SetSkeletalMeshAsset` 重设网格，其余槽位改写 → 垃圾回收。
+- **已实现但还没运行过**：`renameload <资产名>`，只做前两步、只针对一个资产所在的包，不改任何引用。用来证明新旧两份可以并存。这是第一条会改动引擎状态的指令。
+- 还没做：批量改名加载、重设网格和改写槽位、清掉组件上的覆盖材质（要先确认用哪个脚本函数）、接到挂载之后自动执行。
 
 ## Next step
 
-1. 用户启动游戏（任何时候，不需要特定角色），告诉我一声。先看日志里“外壳: 核心已加载”“就绪”，再发一条 `objects GameEngine` 确认指令通道和对象系统在真游戏里正常。
-2. 用查看指令依次摸清上面列的入口。每查一步把结论记到 ARCHITECTURE。需要反汇编时，把字节写成 `db` 交给 MSVC 的 `ml64` 汇编，再用 `dumpbin /disasm` 看。
-3. 入口齐了之后，在核心里加写操作的指令，一步一步做：先改名并加载新包，用探测确认新旧并存；再替换引用并回收，用探测确认旧对象消失。每一版核心直接部署，游戏不用关。
+1. 已告诉用户接下来要做第一次写操作，等用户确认可以开始（游戏可能崩溃）。
+2. 得到确认后：`renameload 042_blackbird_body_d`，看答案里改名是否成功、加载返回的是不是一个新对象；再 `objects 042_blackbird_body_d` 确认新旧并存；观察游戏是否正常。
+3. 成功后做批量版，再做第三步，每一步之后用 `probe` 核对。
+4. 每轮改动测试通过后提交并推送，再更新记忆。
 
-读游戏里的日志和报告要用允许写共享的方式，参考 `test\run.ps1` 的 `Read-Shared`。
+用 `tools\ask.ps1` 发指令，用 `tools\disasm.ps1` 反汇编 `code` 指令取回的字节。
