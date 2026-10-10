@@ -7,7 +7,7 @@
   - 挂载成功后 120 秒内每 5 秒请求一次垃圾回收（调用 `UKismetSystemLibrary::execCollectGarbage`）。
   - 同一个委托实例被探测窗口重复看到时不再报“2 处绑定”。
   - 启动时把上一次的日志保留为 `HTReload.prev.log`。
-- git：远程 `origin` = `https://github.com/loyal37/HT-Reload`（用户自己建的私有仓库）。提交和推送情况见本文件末尾。
+- git：远程 `origin` = `https://github.com/loyal37/HT-Reload`（用户自己建的私有仓库）。v0.2.0 的源码提交是 `7210708e8175d60e64859a49f1e378a0abf280f7`，已推送到 `main` 并核对远程一致；之后只有记忆文件的更新提交。没有标签，没有 Release。
 
 ## 真游戏验证进度（以下都是 v0.1.0 的结果）
 
