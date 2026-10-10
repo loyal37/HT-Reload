@@ -1,7 +1,7 @@
 // Stand-in for the game, used to exercise HTReload.asi without launching it.
-// It reproduces only what the plugin relies on: the anchor string referenced from the mount
-// handler, a heap delegate instance holding { object, method }, the two generated tables that name
-// CollectGarbage, and an "UnrealWindow" message pump.
+// It reproduces only what the plugin relies on: the anchor strings referenced from the mount and
+// unmount handlers, heap delegate instances holding { object, method }, mounted container files that
+// are held open, the two generated tables that name CollectGarbage, and an "UnrealWindow" message pump.
 // Built as HTGame.exe under <test root>/HT/Binaries/Win64 so the plugin derives the same paths.
 
 #include <windows.h>
@@ -267,21 +267,50 @@ struct PlatformFile {
     virtual const wchar_t* Name() { return L"Base"; }
 };
 
+// The two versions of one container that the test publishes, in order.
+const wchar_t* const kHotPaks[] = {L"../../../HT/Content/Paks/MOD/hot/hot_1_P.pak",
+                                   L"../../../HT/Content/Paks/MOD/hot/hot_2_P.pak"};
+
+// Like the engine, the host keeps the data files of a mounted container open in a way that lets
+// others read them but not delete them.
+struct MountedPak {
+    const wchar_t* path;
+    HANDLE files[2];
+};
+MountedPak g_mountedPaks[2];
+int g_mountCount = 0;
+int g_unmountCalls = 0;
+
+HANDLE HoldOpen(const wchar_t* pakPath, const wchar_t* extension) {
+    wchar_t path[512];
+    wcscpy_s(path, pakPath);
+    wcscpy_s(wcsrchr(path, L'.'), 8, extension);
+    return CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+}
+
 struct PakPlatformFile : PlatformFile {
     const wchar_t* Name() override { return L"PakFile"; }
 
     __declspec(noinline) void* HandleMountPak(const EngineString& path, int order) {
         DebugPrint(L"Mounting pak file: %s \n", path.data);
-        const wchar_t* expected = L"../../../HT/Content/Paks/MOD/hot/hot_1_P.pak";
+        const wchar_t* expected = g_mountCount < 2 ? kHotPaks[g_mountCount] : L"";
         bool ok = wcscmp(path.data, expected) == 0 && order == -1 && path.num == static_cast<int>(wcslen(expected)) + 1 &&
-                  GetCurrentThreadId() == g_mainThread && !g_mounted;
+                  GetCurrentThreadId() == g_mainThread;
+        if (ok) {
+            g_mountedPaks[g_mountCount] = {expected, {HoldOpen(expected, L".ucas"), HoldOpen(expected, L".utoc")}};
+            ok = g_mountedPaks[g_mountCount].files[0] != INVALID_HANDLE_VALUE &&
+                 g_mountedPaks[g_mountCount].files[1] != INVALID_HANDLE_VALUE;
+            ++g_mountCount;
+        }
         wprintf(L"host: mount call order=%d num=%d thread_ok=%d -> %s\n", order, path.num,
                 GetCurrentThreadId() == g_mainThread, ok ? L"OK" : L"UNEXPECTED");
-        g_result = ok ? 0 : 3;
-        g_mounted = true;
         if (!ok) {
+            g_result = 3;
             PostQuitMessage(0);
+        } else if (g_result < 0) {
+            g_result = 0;
         }
+        g_mounted = true;
         return this;
     }
 
@@ -289,6 +318,28 @@ struct PakPlatformFile : PlatformFile {
     __declspec(noinline) void* HandleMountPaksEx(const EngineString& path) {
         DebugPrint(L"Mounting pak file: %s \n", path.data);
         return nullptr;
+    }
+
+    // The only unmount the test expects is that of the first version, once the second is mounted.
+    __declspec(noinline) bool HandleUnmountPak(const EngineString& path) {
+        DebugPrint(L"Unmounting pak file: %s \n", path.data);
+        bool found = false;
+        for (MountedPak& pak : g_mountedPaks) {
+            if (pak.path && _wcsicmp(pak.path, path.data) == 0) {
+                CloseHandle(pak.files[0]);
+                CloseHandle(pak.files[1]);
+                pak.path = nullptr;
+                found = true;
+            }
+        }
+        bool ok = found && wcscmp(path.data, kHotPaks[0]) == 0 && path.num == static_cast<int>(wcslen(kHotPaks[0])) + 1 &&
+                  GetCurrentThreadId() == g_mainThread && g_mountCount == 2 && g_unmountCalls++ == 0;
+        wprintf(L"host: unmount call num=%d thread_ok=%d found=%d -> %s\n", path.num, GetCurrentThreadId() == g_mainThread,
+                found, ok ? L"OK" : L"UNEXPECTED");
+        if (!ok) {
+            g_result = 7;
+        }
+        return found;
     }
 };
 
@@ -299,12 +350,20 @@ struct RawMethodInstance {
     void* (PakPlatformFile::*method)(const EngineString&, int);
 };
 
+struct RawUnmountInstance {
+    void* vtable;
+    unsigned long long handle;
+    PakPlatformFile* userObject;
+    bool (PakPlatformFile::*method)(const EngineString&);
+};
+
 struct Delegate {
     void* instance;
     int size;
 };
 
 Delegate g_mountPak;
+Delegate g_unmountPak;
 
 int wmain(int argc, wchar_t** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -341,6 +400,8 @@ int wmain(int argc, wchar_t** argv) {
         ULONGLONG elapsed = GetTickCount64() - start;
         // The real engine binds the delegate and opens its window some time after plugins load.
         if (!g_mountPak.instance && elapsed > 2500) {
+            g_unmountPak.instance = new RawUnmountInstance{nullptr, 2, pakFile, &PakPlatformFile::HandleUnmountPak};
+            g_unmountPak.size = sizeof(RawUnmountInstance);
             g_mountPak.instance = new RawMethodInstance{nullptr, 1, pakFile, &PakPlatformFile::HandleMountPak};
             g_mountPak.size = sizeof(RawMethodInstance);
         }

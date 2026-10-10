@@ -296,6 +296,16 @@ void Reloader::CallTest(std::string& report) {
     }
 }
 
+size_t Reloader::RetiredPackagesAlive() const {
+    ObjectView view(objects_);
+    size_t alive = 0;
+    for (size_t i = 0; i < view.All().size(); ++i) {
+        int32_t index = static_cast<int32_t>(i);
+        alive += view[index].outer == 0 && view.Name(index).find(kRetiredMark) != std::string::npos;
+    }
+    return alive;
+}
+
 void Reloader::RenameAndLoad(const std::string& assetName, std::string& report) {
     if (!calls_.Ready() && !Resolve(report)) {
         return;

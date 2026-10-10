@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -31,7 +32,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.6.2";
+const char kVersion[] = "0.7.0";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -58,6 +59,7 @@ struct EngineString {
 };
 
 using HandleMountPakFn = void* (*)(void* self, const EngineString* pakFilePath, int32_t pakOrder);
+using HandleUnmountPakFn = bool (*)(void* self, const EngineString* pakFilePath);
 using NativeThunkFn = void (*)(void* context, void* stack, void* result);
 
 // After a mount, old assets only go away once nothing references them and a collection runs.
@@ -149,6 +151,47 @@ void* CallHandleMountPak(const MountApi& api, const wchar_t* path, int32_t lengt
     }
 }
 
+bool CallHandleUnmountPak(const MountApi& api, const wchar_t* path, int32_t length, DWORD* exceptionCode) {
+    EngineString text{path, length + 1, length + 1};
+    __try {
+        return reinterpret_cast<HandleUnmountPakFn>(api.handleUnmountPak)(reinterpret_cast<void*>(api.pakPlatformFile), &text);
+    } __except (*exceptionCode = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Whether someone holds the file open in a way that forbids deleting it, as the engine does with the
+// files of a mounted container. Asks for delete access; nothing is deleted.
+bool HeldOpen(const fs::path& file) {
+    HANDLE handle = CreateFileW(file.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                OPEN_EXISTING, 0, nullptr);
+    if (handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(handle);
+        return false;
+    }
+    return GetLastError() == ERROR_SHARING_VIOLATION;
+}
+
+// What the engine adds to the mount order of a pak because of its name, in hundreds: 0 without the
+// _P suffix, N+1 for <name>_<N>_P, otherwise 1. Mirrors FPakPlatformFile::Mount.
+int PatchRank(const fs::path& pak) {
+    std::wstring name = pak.stem().wstring();
+    if (name.size() < 2 || _wcsicmp(name.c_str() + name.size() - 2, L"_P") != 0) {
+        return 0;
+    }
+    size_t versionEnd = name.size() - 2;
+    size_t versionStart = versionEnd ? name.rfind(L'_', versionEnd - 1) : std::wstring::npos;
+    if (versionStart == std::wstring::npos) {
+        return 1;
+    }
+    std::wstring digits = name.substr(versionStart + 1, versionEnd - versionStart - 1);
+    if (digits.empty() || digits.size() > 6 || digits.find_first_not_of(L"0123456789") != std::wstring::npos) {
+        return 1;
+    }
+    int version = _wtoi(digits.c_str());
+    return version >= 1 ? version + 1 : 1;
+}
+
 // ForceGarbageCollection only raises a flag; the engine collects on its next tick.
 bool CallCollectGarbage(uintptr_t thunk) {
     // Stands in for the script frame. Its null code pointer makes the thunk's P_FINISH a no-op.
@@ -196,12 +239,14 @@ public:
         for (const fs::path& pak : ListPaks(paths_.paksDir)) {
             handled_.insert(Key(pak));
         }
+        mounted_ = handled_;
         Log("磁盘上已有 %zu 个 pak，视为已挂载", handled_.size());
     }
 
     void Poll() {
         RunCommands();
         RequestCollection();
+        UnmountWhenCollected();
         for (const fs::path& pak : ListPaks(paths_.paksDir)) {
             std::wstring key = Key(pak);
             if (handled_.count(key)) {
@@ -275,6 +320,7 @@ private:
             Beep(300, 600);
         } else if (job->pakFile) {
             Log("挂载成功 (IPakFile %p)", job->pakFile);
+            mounted_.insert(Key(pak));
             Beep(1200, 120);
             Beep(1600, 160);
             ReloadMounted(pak);
@@ -300,16 +346,7 @@ private:
             result = reloader_.Reload(ids, report);
         }
         WriteWholeFile(paths_.moduleDir / L"HTReload.reload.txt", report);
-        // The report lists every slot; the log gets the lines above that list.
-        std::istringstream lines(report);
-        for (std::string line; std::getline(lines, line);) {
-            while (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            if (!line.empty() && line[0] != '[') {
-                Log("重载: %s", line.c_str());
-            }
-        }
+        LogReport("重载", report);
         ULONGLONG window = kCollectWindowMs;
         if (result == ReloadResult::Done) {
             Log("重载完成，新版本已经生效");
@@ -324,6 +361,141 @@ private:
             nextCollect_ = 0;
             Log("接下来 %llu 秒内每 %llu 秒请求一次垃圾回收", window / 1000, kCollectIntervalMs / 1000);
         }
+        // With the game on the new version, the older ones can be unmounted once their assets are gone.
+        if (result != ReloadResult::Failed) {
+            unmountCheckAt_ = GetTickCount64() + 6000;
+            unmountGiveUpAt_ = unmountCheckAt_ + 24000;
+        }
+    }
+
+    // Writes the lines of a report to the log, leaving out the per-slot lines, which start with a bracket.
+    static void LogReport(const char* prefix, const std::string& report) {
+        std::istringstream lines(report);
+        for (std::string line; std::getline(lines, line);) {
+            while (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (!line.empty() && line[0] != '[') {
+                Log("%s: %s", prefix, line.c_str());
+            }
+        }
+    }
+
+    // Mod containers that a newer version has made redundant: every package they hold is also in
+    // another mounted mod container with a higher patch number, so the engine reads nothing from them
+    // any more. A container counts as mounted while its data file is held open.
+    std::vector<fs::path> ShadowedContainers() {
+        struct Container {
+            fs::path pak;
+            std::vector<uint64_t> ids;
+            int rank;
+        };
+        std::vector<Container> mounted;
+        for (const fs::path& pak : ListPaks(paths_.paksDir)) {
+            fs::path utoc = pak;
+            fs::path ucas = pak;
+            utoc.replace_extension(L".utoc");
+            ucas.replace_extension(L".ucas");
+            // A file the packager is still writing is held open too, hence the check against what was mounted.
+            if (pak.parent_path() == paths_.paksDir || !mounted_.count(Key(pak)) || !HeldOpen(ucas)) {
+                continue;
+            }
+            std::vector<uint64_t> ids = ReadContainerPackageIds(utoc.wstring());
+            if (!ids.empty()) {
+                mounted.push_back({pak, std::move(ids), PatchRank(pak)});
+            }
+        }
+        std::vector<fs::path> shadowed;
+        for (const Container& old : mounted) {
+            for (const Container& newer : mounted) {
+                if (newer.rank > old.rank && std::includes(newer.ids.begin(), newer.ids.end(), old.ids.begin(), old.ids.end())) {
+                    shadowed.push_back(old.pak);
+                    break;
+                }
+            }
+        }
+        return shadowed;
+    }
+
+    // Has the engine unmount the containers that newer versions have made redundant, which makes it
+    // let go of their files. Returns false when that has to wait because old assets are still alive.
+    bool UnmountShadowed(std::string& report) {
+        if (!api_.handleUnmountPak && !unmountDisabled_) {
+            // The engine binds this handler a moment after the mount handler, so the look at startup can be too early.
+            image_->Refresh();
+            api_.handleUnmountPak = FindUnmountHandler(*image_, api_.pakPlatformFile);
+        }
+        if (!api_.handleUnmountPak || unmountDisabled_) {
+            report += unmountDisabled_ ? "卸载已停用\r\n" : "没找到引擎的卸载入口\r\n";
+            return true;
+        }
+        std::vector<fs::path> shadowed = ShadowedContainers();
+        if (shadowed.empty()) {
+            report += "没有被新版本完全取代的旧容器\r\n";
+            return true;
+        }
+        if (!EnsureObjects()) {
+            report += "对象系统不可用，不卸载\r\n";
+            return true;
+        }
+        size_t retired = reloader_.RetiredPackagesAlive();
+        if (retired) {
+            report += "还有 " + std::to_string(retired) + " 个旧包没有被回收，旧容器保持挂载\r\n";
+            return false;
+        }
+        for (const fs::path& pak : shadowed) {
+            std::error_code error;
+            fs::path relative = fs::relative(pak, paths_.paksDir, error);
+            if (error || unmountDisabled_) {
+                continue;
+            }
+            std::wstring enginePath = paths_.enginePrefix + relative.generic_wstring();
+            fs::path ucas = pak;
+            ucas.replace_extension(L".ucas");
+            bool unmounted = false;
+            DWORD exceptionCode = 0;
+            MountApi api = api_;
+            bool ran = GameThread_RunAndWait(
+                [&] {
+                    unmounted = CallHandleUnmountPak(api, enginePath.c_str(), static_cast<int32_t>(enginePath.size()), &exceptionCode);
+                },
+                30000);
+            std::string name = Utf8(pak.stem().wstring());
+            if (!ran) {
+                report += name + ": 游戏线程没有执行卸载\r\n";
+            } else if (exceptionCode) {
+                unmountDisabled_ = true;
+                char code[32];
+                snprintf(code, sizeof code, "%#lx", exceptionCode);
+                report += name + ": 严重: 卸载调用抛出异常 " + code + "，已停止后续卸载，建议重启游戏\r\n";
+                Beep(300, 600);
+            } else if (!unmounted) {
+                report += name + ": 引擎没有卸载它（返回否），路径 " + Utf8(enginePath) + "\r\n";
+            } else if (HeldOpen(ucas)) {
+                mounted_.erase(Key(pak));
+                report += name + ": 引擎已卸载，但文件仍被占用\r\n";
+            } else {
+                mounted_.erase(Key(pak));
+                report += name + ": 已卸载，这个旧版本的三件套现在可以删除\r\n";
+            }
+        }
+        return true;
+    }
+
+    // After a reload the old assets take a collection or two to go away; the old containers are
+    // unmounted once they have.
+    void UnmountWhenCollected() {
+        ULONGLONG now = GetTickCount64();
+        if (!unmountCheckAt_ || now < unmountCheckAt_) {
+            return;
+        }
+        std::string report;
+        if (!UnmountShadowed(report) && now < unmountGiveUpAt_) {
+            unmountCheckAt_ = now + 5000;
+            return;
+        }
+        unmountCheckAt_ = 0;
+        LogReport("卸载", report);
     }
 
     // Instructions dropped into HTReload.cmd.txt next to the plugin, one per line. Answers go to
@@ -335,6 +507,8 @@ private:
     //   plan [filter]           list what a reload of those containers would do
     //   renameload <asset>      WRITES: rename the package holding that asset and load the asset again
     //   reload [filter]         WRITES: replace the loaded assets of those containers by fresh copies
+    //   shadowed                list the mounted mod containers that a newer version has made redundant
+    //   unmount                 WRITES: have the engine unmount those containers, which frees their files
     void RunCommands() {
         fs::path path = paths_.moduleDir / L"HTReload.cmd.txt";
         std::error_code error;
@@ -409,6 +583,13 @@ private:
                 collectUntil_ = GetTickCount64() + 20000;
                 nextCollect_ = 0;
             }
+        } else if (command == "shadowed") {
+            for (const fs::path& pak : ShadowedContainers()) {
+                answers += Utf8(pak.wstring()) + "\r\n";
+            }
+            answers += "还活着的旧包: " + std::to_string(reloader_.RetiredPackagesAlive()) + " 个\r\n";
+        } else if (command == "unmount") {
+            UnmountShadowed(answers);
         } else if (!Explore(command, arguments, *image_, *objects_, answers)) {
             answers += "不认识的指令\r\n";
         }
@@ -471,8 +652,12 @@ private:
     Reloader reloader_{*image_, *objects_};
     std::wstring reportPath_ = (paths_.moduleDir / L"HTReload.probe.txt").wstring();
     std::set<std::wstring> handled_;
+    std::set<std::wstring> mounted_;  // paks the engine has mounted, as far as the plugin knows
     std::map<std::wstring, Pending> pending_;
     bool disabled_ = false;
+    bool unmountDisabled_ = false;
+    ULONGLONG unmountCheckAt_ = 0;  // when to look next whether old containers can be unmounted; 0 = not pending
+    ULONGLONG unmountGiveUpAt_ = 0;
     ULONGLONG collectUntil_ = 0;
     ULONGLONG nextCollect_ = 0;
     std::shared_ptr<std::atomic<bool>> collectFailed_ = std::make_shared<std::atomic<bool>>(false);
@@ -510,8 +695,10 @@ void Run() {
 
     // The delegate is bound right after the engine's startup scan, so everything on disk now is mounted.
     uintptr_t collectGarbage = FindCollectGarbageThunk(image);
+    MountApi api = resolver.Api();
+    api.handleUnmountPak = FindUnmountHandler(image, api.pakPlatformFile);
     ObjectSystem objects;
-    Watcher watcher(paths, resolver.Api(), collectGarbage, &objects, &image);
+    Watcher watcher(paths, api, collectGarbage, &objects, &image);
 
     while (!GameThread_Ready()) {
         if (WaitStop(1000)) {

@@ -36,6 +36,10 @@ public:
     // everything that used the old assets use the new ones. The old ones go with the next collection.
     ReloadResult Reload(const std::vector<uint64_t>& packageIds, std::string& report);
 
+    // How many packages that a reload renamed out of the way are still alive. Zero once the old
+    // assets have all been collected. Read-only.
+    size_t RetiredPackagesAlive() const;
+
     // Changes engine state: renames the loaded package that holds the asset `assetName` and loads the
     // asset again. Nothing is repointed, so the game keeps using the old copy; this only proves that
     // the two copies can exist side by side.

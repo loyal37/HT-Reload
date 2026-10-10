@@ -9,7 +9,12 @@
 struct MountApi {
     uintptr_t handleMountPak = 0;   // IPakFile* FPakPlatformFile::HandleMountPakDelegate(const FString&, int32)
     uintptr_t pakPlatformFile = 0;  // the FPakPlatformFile bound to FCoreDelegates::MountPak
+    uintptr_t handleUnmountPak = 0; // bool FPakPlatformFile::HandleUnmountPakDelegate(const FString&), 0 if not found
 };
+
+// Address of FPakPlatformFile::HandleUnmountPakDelegate, the handler that FCoreDelegates::OnUnmountPak
+// has bound to `pakPlatformFile`. 0 when it cannot be identified.
+uintptr_t FindUnmountHandler(const Image& image, uintptr_t pakPlatformFile);
 
 // Address of UKismetSystemLibrary::execCollectGarbage, the script thunk that asks the engine for a
 // full garbage collection on its next tick. 0 when it cannot be identified.

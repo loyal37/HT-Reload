@@ -12,9 +12,40 @@ namespace {
 // Passed to LowLevelOutputDebugStringf by HandleMountPakDelegate and by the MountPaksEx handler,
 // so it survives in shipping builds and is referenced from exactly those functions.
 const wchar_t kMountAnchor[] = L"Mounting pak file: %s \n";
+// The same for HandleUnmountPakDelegate.
+const wchar_t kUnmountAnchor[] = L"Unmounting pak file: %s \n";
 
 constexpr size_t kPage = 0x1000;
 constexpr size_t kInstanceWords = 12;
+
+// Calls visit(slot, storage, words, index) for every word of the image's writable data and of the
+// heap block such a word points at. Those are the places where a global delegate keeps the
+// { object, method } pair it is bound to: inline, or in a heap-allocated instance.
+template <class Visit>
+void ForEachInstanceWord(const Image& image, ReadableCache& cache, Visit&& visit) {
+    for (const Region& region : image.writable) {
+        for (uintptr_t page = region.begin; page < region.end; page += kPage) {
+            uintptr_t slots[kPage / sizeof(uintptr_t)];
+            size_t count = std::min<size_t>(kPage, region.end - page) / sizeof(uintptr_t);
+            if (!SafeRead(page, slots, count * sizeof(uintptr_t))) {
+                continue;
+            }
+            for (size_t i = 0; i < count; ++i) {
+                uintptr_t slot = page + i * sizeof(uintptr_t);
+                visit(slot, slot, slots, i);  // delegate with inline storage
+                uintptr_t instance = slots[i];
+                uintptr_t words[kInstanceWords];
+                if (!PlausibleHeapPointer(image, instance) || !cache.Readable(instance, sizeof words) ||
+                    !SafeRead(instance, words, sizeof words)) {
+                    continue;
+                }
+                for (size_t k = 1; k < kInstanceWords; ++k) {
+                    visit(slot, instance, words, k);
+                }
+            }
+        }
+    }
+}
 
 bool Has(const std::vector<uintptr_t>& values, uintptr_t value) {
     return std::find(values.begin(), values.end(), value) != values.end();
@@ -122,6 +153,40 @@ uintptr_t FindEngineGlobal(uintptr_t collectGarbageThunk) {
     return 0;
 }
 
+// FCoreDelegates::OnUnmountPak is bound to the same object as MountPak, in the same way, so the
+// handler is the function that uses the anchor string and sits next to that object in a delegate instance.
+uintptr_t FindUnmountHandler(const Image& image, uintptr_t pakPlatformFile) {
+    std::vector<uintptr_t> strings = FindBytes(image.readOnly, kUnmountAnchor, sizeof kUnmountAnchor);
+    if (strings.size() != 1) {
+        Log("卸载: 锚点字符串出现 %zu 次，需要正好 1 次，本次运行不卸载旧容器", strings.size());
+        return 0;
+    }
+    std::vector<uintptr_t> candidates;
+    for (uintptr_t ref : FindLeaRefs(image.exec, strings[0], nullptr)) {
+        uintptr_t function = FunctionStart(ref);
+        if (function && !Has(candidates, function)) {
+            candidates.push_back(function);
+        }
+    }
+    std::vector<uintptr_t> bound;
+    ReadableCache cache;
+    ForEachInstanceWord(image, cache, [&](uintptr_t, uintptr_t, const uintptr_t* words, size_t index) {
+        if (index > 0 && words[index - 1] == pakPlatformFile && Has(candidates, words[index]) && !Has(bound, words[index])) {
+            bound.push_back(words[index]);
+        }
+    });
+    if (bound.size() != 1) {
+        Log("卸载: 引用锚点的函数 %zu 个，其中绑定到挂载对象的 %zu 个，需要正好 1 个，本次运行不卸载旧容器", candidates.size(),
+            bound.size());
+        return 0;
+    }
+    uintptr_t functionEnd = 0;
+    FunctionStart(bound[0], &functionEnd);
+    Log("卸载: HandleUnmountPakDelegate RVA %#zx 大小 %#zx", bound[0] - image.base, functionEnd - bound[0]);
+    LogBytes("函数", bound[0], std::min<size_t>(functionEnd > bound[0] ? functionEnd - bound[0] : 0, 0x80));
+    return bound[0];
+}
+
 bool Resolver::Step(const Image& image) {
     ++attempts_;
     bool verbose = attempts_ <= 3 || attempts_ % 20 == 0;
@@ -198,28 +263,7 @@ bool Resolver::FindBoundInstance(const Image& image, bool verbose) {
             index * sizeof(uintptr_t), words[index] - image.base, words[index - 1]);
     };
 
-    for (const Region& region : image.writable) {
-        for (uintptr_t page = region.begin; page < region.end; page += kPage) {
-            uintptr_t slots[kPage / sizeof(uintptr_t)];
-            size_t count = std::min<size_t>(kPage, region.end - page) / sizeof(uintptr_t);
-            if (!SafeRead(page, slots, count * sizeof(uintptr_t))) {
-                continue;
-            }
-            for (size_t i = 0; i < count; ++i) {
-                uintptr_t slot = page + i * sizeof(uintptr_t);
-                consider(slot, slot, slots, i);  // delegate with inline storage
-                uintptr_t instance = slots[i];
-                uintptr_t words[kInstanceWords];
-                if (!PlausibleHeapPointer(image, instance) || !cache.Readable(instance, sizeof words) ||
-                    !SafeRead(instance, words, sizeof words)) {
-                    continue;
-                }
-                for (size_t k = 1; k < kInstanceWords; ++k) {
-                    consider(slot, instance, words, k);
-                }
-            }
-        }
-    }
+    ForEachInstanceWord(image, cache, consider);
 
     if (hits == 0) {
         if (verbose) {
