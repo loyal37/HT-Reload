@@ -15,6 +15,10 @@ struct MountApi {
 // full garbage collection on its next tick. 0 when it cannot be identified.
 uintptr_t FindCollectGarbageThunk(const Image& image);
 
+// Address of the GEngine pointer, read out of the thunk's `mov rcx, [rip+GEngine]`. 0 when the
+// thunk does not have that shape.
+uintptr_t FindEngineGlobal(uintptr_t collectGarbageThunk);
+
 class Resolver {
 public:
     // Returns true once the API is known. Meant to be retried while the game starts up.

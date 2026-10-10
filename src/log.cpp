@@ -5,20 +5,16 @@
 #include <cstdarg>
 #include <cstdio>
 
+#include "host.h"
+
 namespace {
 
-HANDLE g_file = INVALID_HANDLE_VALUE;
-SRWLOCK g_lock = SRWLOCK_INIT;
+const CoreHost* g_host = nullptr;
 
 }  // namespace
 
-void LogOpen(const std::wstring& path) {
-    g_file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
-                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (g_file != INVALID_HANDLE_VALUE) {
-        DWORD written = 0;
-        WriteFile(g_file, "\xEF\xBB\xBF", 3, &written, nullptr);
-    }
+void LogAttach(const CoreHost* host) {
+    g_host = host;
 }
 
 void Log(const char* format, ...) {
@@ -27,25 +23,9 @@ void Log(const char* format, ...) {
     va_start(args, format);
     int length = vsnprintf(text, sizeof text, format, args);
     va_end(args);
-    if (length < 0) {
-        return;
+    if (length >= 0 && g_host) {
+        g_host->log(text);
     }
-    if (length >= static_cast<int>(sizeof text)) {
-        length = sizeof text - 1;
-    }
-
-    SYSTEMTIME now;
-    GetLocalTime(&now);
-    char line[2100];
-    int lineLength = snprintf(line, sizeof line, "[%02u:%02u:%02u.%03u] %.*s\r\n", now.wHour, now.wMinute,
-                              now.wSecond, now.wMilliseconds, length, text);
-
-    AcquireSRWLockExclusive(&g_lock);
-    if (g_file != INVALID_HANDLE_VALUE) {
-        DWORD written = 0;
-        WriteFile(g_file, line, static_cast<DWORD>(lineLength), &written, nullptr);
-    }
-    ReleaseSRWLockExclusive(&g_lock);
 }
 
 std::string Utf8(const std::wstring& text) {

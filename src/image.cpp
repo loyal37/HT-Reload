@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
 namespace {
 
@@ -52,6 +53,22 @@ size_t ScanLeaBlock(const uint8_t* begin, const uint8_t* end, uintptr_t target, 
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         *faulted = true;
+    }
+    return count;
+}
+
+size_t ScanBranchBlock(const uint8_t* begin, const uint8_t* end, uintptr_t target, uintptr_t* out) {
+    size_t count = 0;
+    __try {
+        for (const uint8_t* p = begin; p < end; ++p) {
+            int32_t disp;
+            memcpy(&disp, p, sizeof disp);
+            if (reinterpret_cast<uintptr_t>(p + 4) + static_cast<intptr_t>(disp) == target && (p[-1] == 0xE8 || p[-1] == 0xE9) &&
+                count < kMaxHitsPerBlock) {
+                out[count++] = reinterpret_cast<uintptr_t>(p);
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
     return count;
 }
@@ -117,6 +134,27 @@ bool SafeRead(uintptr_t address, void* out, size_t size) {
     return CopyNoFault(address, out, size) == size;
 }
 
+bool PlausibleHeapPointer(const Image& image, uintptr_t value) {
+    return value >= 0x10000 && value < 0x00007FFFFFFF0000 && (value & 7) == 0 && !image.Contains(value);
+}
+
+bool ReadableCache::Readable(uintptr_t address, size_t size) {
+    for (const Entry& entry : entries_) {
+        if (address >= entry.begin && address < entry.end) {
+            return entry.readable && address + size <= entry.end;
+        }
+    }
+    MEMORY_BASIC_INFORMATION info{};
+    if (!VirtualQuery(reinterpret_cast<const void*>(address), &info, sizeof info)) {
+        return false;
+    }
+    Entry& entry = entries_[next_++ % std::size(entries_)];
+    entry.begin = reinterpret_cast<uintptr_t>(info.BaseAddress);
+    entry.end = entry.begin + info.RegionSize;
+    entry.readable = info.State == MEM_COMMIT && !(info.Protect & (PAGE_GUARD | PAGE_NOACCESS));
+    return entry.readable && address + size <= entry.end;
+}
+
 std::vector<uintptr_t> FindBytes(const std::vector<Region>& regions, const void* pattern, size_t size) {
     constexpr uintptr_t kBlock = 0x10000;
     std::vector<uintptr_t> hits;
@@ -157,6 +195,25 @@ std::vector<uintptr_t> FindLeaRefs(const std::vector<Region>& regions, uintptr_t
     }
     if (faultedPages) {
         *faultedPages = faults;
+    }
+    return refs;
+}
+
+std::vector<uintptr_t> FindBranchRefs(const std::vector<Region>& regions, uintptr_t target) {
+    std::vector<uintptr_t> refs;
+    for (const Region& region : regions) {
+        if (region.end - region.begin < 8) {
+            continue;
+        }
+        uintptr_t last = region.end - 4;
+        for (uintptr_t begin = region.begin + 1; begin < last;) {
+            uintptr_t blockEnd = std::min(last, (begin + kPage) & ~(kPage - 1));
+            uintptr_t found[kMaxHitsPerBlock];
+            size_t count = ScanBranchBlock(reinterpret_cast<const uint8_t*>(begin), reinterpret_cast<const uint8_t*>(blockEnd),
+                                           target, found);
+            refs.insert(refs.end(), found, found + count);
+            begin = blockEnd;
+        }
     }
     return refs;
 }

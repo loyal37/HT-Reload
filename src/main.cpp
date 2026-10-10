@@ -1,31 +1,48 @@
-// HTReload: mounts pak mods that appear under <Project>/Content/Paks while the game is running,
-// by calling the engine's own FCoreDelegates::MountPak handler on the game thread.
+// HTReload core: mounts pak mods that appear under <Project>/Content/Paks while the game is running,
+// by calling the engine's own FCoreDelegates::MountPak handler on the game thread. Loaded and
+// replaced at run time by the shell (see host.h).
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cstdlib>
+#include <exception>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "explore.h"
 #include "game_thread.h"
+#include "host.h"
 #include "image.h"
 #include "log.h"
+#include "objects.h"
+#include "probe.h"
 #include "resolver.h"
 
 namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.2.0";
+const char kVersion[] = "0.4.0";
 
-HMODULE g_module = nullptr;
+const CoreHost* g_host = nullptr;
+HANDLE g_stop = nullptr;
+HANDLE g_worker = nullptr;
+
+// Sleeps, and returns true if the core has been asked to shut down.
+bool WaitStop(DWORD milliseconds) {
+    return WaitForSingleObject(g_stop, milliseconds) != WAIT_TIMEOUT;
+}
 
 struct Paths {
-    fs::path moduleDir;         // where this .asi lives
+    fs::path moduleDir;         // where the plugin lives
     fs::path paksDir;           // <Project>/Content/Paks
     std::wstring enginePrefix;  // the same directory the way the engine spells it
 };
@@ -52,22 +69,13 @@ struct MountJob {
     ~MountJob() { CloseHandle(done); }
 };
 
-fs::path ModulePath(HMODULE module) {
-    std::wstring buffer(1024, L'\0');
-    DWORD length = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
-    buffer.resize(length);
-    return buffer;
-}
-
-bool IsGameProcess() {
-    return _wcsicmp(ModulePath(nullptr).filename().c_str(), L"HTGame.exe") == 0;
-}
-
 Paths MakePaths() {
     // <Root>/<Project>/Binaries/Win64/HTGame.exe; the engine addresses content relative to that folder.
-    fs::path projectDir = ModulePath(nullptr).parent_path().parent_path().parent_path();
+    std::wstring exe(1024, L'\0');
+    exe.resize(GetModuleFileNameW(nullptr, exe.data(), static_cast<DWORD>(exe.size())));
+    fs::path projectDir = fs::path(exe).parent_path().parent_path().parent_path();
     Paths paths;
-    paths.moduleDir = ModulePath(g_module).parent_path();
+    paths.moduleDir = g_host->directory;
     paths.paksDir = projectDir / L"Content" / L"Paks";
     paths.enginePrefix = L"../../../" + projectDir.filename().wstring() + L"/Content/Paks/";
     return paths;
@@ -150,17 +158,46 @@ bool CallCollectGarbage(uintptr_t thunk) {
     }
 }
 
+std::string ReadSmallFile(const fs::path& path) {
+    std::string text;
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                              OPEN_EXISTING, 0, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        char buffer[8192];
+        DWORD read = 0;
+        if (ReadFile(file, buffer, sizeof buffer, &read, nullptr)) {
+            text.assign(buffer, read);
+        }
+        CloseHandle(file);
+    }
+    if (text.rfind("\xEF\xBB\xBF", 0) == 0) {
+        text.erase(0, 3);
+    }
+    return text;
+}
+
+void WriteWholeFile(const fs::path& path, const std::string& text) {
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+        CloseHandle(file);
+    }
+}
+
 class Watcher {
 public:
-    Watcher(Paths paths, MountApi api, uintptr_t collectGarbage)
-        : paths_(std::move(paths)), api_(api), collectGarbage_(collectGarbage) {
+    Watcher(Paths paths, MountApi api, uintptr_t collectGarbage, ObjectSystem* objects, Image* image)
+        : paths_(std::move(paths)), api_(api), collectGarbage_(collectGarbage), objects_(objects), image_(image) {
         for (const fs::path& pak : ListPaks(paths_.paksDir)) {
             handled_.insert(Key(pak));
         }
-        Log("启动时已有 %zu 个 pak，视为引擎已挂载", handled_.size());
+        Log("磁盘上已有 %zu 个 pak，视为已挂载", handled_.size());
     }
 
     void Poll() {
+        RunCommands();
         RequestCollection();
         for (const fs::path& pak : ListPaks(paths_.paksDir)) {
             std::wstring key = Key(pak);
@@ -215,7 +252,15 @@ private:
             return;
         }
 
-        for (int waited = 0; WaitForSingleObject(job->done, 5000) == WAIT_TIMEOUT; waited += 5) {
+        const HANDLE handles[] = {job->done, g_stop};
+        for (int waited = 0;; waited += 5) {
+            DWORD result = WaitForMultipleObjects(2, handles, FALSE, 5000);
+            if (result == WAIT_OBJECT_0) {
+                break;
+            }
+            if (result != WAIT_TIMEOUT) {
+                return;  // shutting down
+            }
             if (waited == 25) {
                 Log("游戏线程 30 秒内没有处理请求（可能正在加载），继续等待");
             }
@@ -226,7 +271,7 @@ private:
             Log("严重: 挂载调用抛出异常 %#lx，已停止后续挂载，建议重启游戏", job->exceptionCode);
             Beep(300, 600);
         } else if (job->pakFile) {
-            Log("挂载成功 (IPakFile %p)。让游戏卸载再加载这个角色后生效", job->pakFile);
+            Log("挂载成功 (IPakFile %p)。返回登录界面再进入后生效", job->pakFile);
             if (collectGarbage_ && !collectFailed_->load()) {
                 collectUntil_ = GetTickCount64() + kCollectWindowMs;
                 nextCollect_ = 0;
@@ -238,6 +283,102 @@ private:
             Log("失败: 引擎拒绝挂载这个包（返回空）");
             Beep(400, 400);
         }
+    }
+
+    // Instructions dropped into HTReload.cmd.txt next to the plugin, one per line. Answers go to
+    // HTReload.out.txt. Besides the read-only queries in explore.h:
+    //   gc [seconds]            request collections for that long (default 15)
+    //   probe <label> [filter]  report on the packages of the mod containers whose path contains `filter`
+    void RunCommands() {
+        fs::path path = paths_.moduleDir / L"HTReload.cmd.txt";
+        std::error_code error;
+        if (!fs::exists(path, error)) {
+            return;
+        }
+        std::string text = ReadSmallFile(path);
+        if (!DeleteFileW(path.c_str())) {
+            return;  // still being written; pick it up on the next poll
+        }
+        std::string answers;
+        std::istringstream lines(text);
+        for (std::string line; std::getline(lines, line);) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+                line.pop_back();
+            }
+            size_t space = line.find(' ');
+            std::string command = line.substr(0, space);
+            std::string arguments = space == std::string::npos ? std::string() : line.substr(space + 1);
+            if (command.empty()) {
+                continue;
+            }
+            Log("指令: %s", line.c_str());
+            answers += "### " + line + "\r\n";
+            try {
+                RunCommand(command, arguments, answers);
+            } catch (const std::exception& exception) {
+                Log("指令失败: %s", exception.what());
+                answers += std::string("失败: ") + exception.what() + "\r\n";
+            }
+            Log("指令完成: %s", line.c_str());
+        }
+        WriteWholeFile(paths_.moduleDir / L"HTReload.out.txt", answers);
+    }
+
+    void RunCommand(const std::string& command, const std::string& arguments, std::string& answers) {
+        std::istringstream words(arguments);
+        std::string first;
+        std::string second;
+        words >> first >> second;
+        if (command == "gc") {
+            if (collectGarbage_ && !collectFailed_->load()) {
+                int seconds = first.empty() ? 15 : std::clamp(atoi(first.c_str()), 1, 600);
+                collectUntil_ = GetTickCount64() + seconds * 1000ull;
+                nextCollect_ = 0;
+            }
+            return;
+        }
+        if (!EnsureObjects()) {
+            answers += "对象系统不可用\r\n";
+            return;
+        }
+        if (command == "probe") {
+            std::vector<uint64_t> ids = ModPackageIds(second);
+            if (ids.empty()) {
+                answers += "没有匹配的 Mod 容器\r\n";
+            } else {
+                ProbeSupersededPackages(*objects_, ids, reportPath_, first.empty() ? "手动" : first.c_str());
+            }
+        } else if (!Explore(command, arguments, *image_, *objects_, answers)) {
+            answers += "不认识的指令\r\n";
+        }
+    }
+
+    // Package ids of every mod container on disk, i.e. the containers below the game's own Paks folder.
+    std::vector<uint64_t> ModPackageIds(const std::string& filter) {
+        std::string wanted = filter;
+        CharLowerBuffA(wanted.data(), static_cast<DWORD>(wanted.size()));
+        std::vector<uint64_t> ids;
+        for (const fs::path& pak : ListPaks(paths_.paksDir)) {
+            if (pak.parent_path() == paths_.paksDir || Utf8(Key(pak)).find(wanted) == std::string::npos) {
+                continue;
+            }
+            fs::path utoc = pak;
+            utoc.replace_extension(L".utoc");
+            std::vector<uint64_t> container = ReadContainerPackageIds(utoc.wstring());
+            ids.insert(ids.end(), container.begin(), container.end());
+        }
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        return ids;
+    }
+
+    // The object table only appears once the engine is up, so it is looked for when first needed.
+    bool EnsureObjects() {
+        image_->Refresh();
+        if (!objects_->Ready()) {
+            objects_->Locate(*image_);
+        }
+        return objects_->Ready();
     }
 
     void RequestCollection() {
@@ -264,6 +405,9 @@ private:
     Paths paths_;
     MountApi api_;
     uintptr_t collectGarbage_;
+    ObjectSystem* objects_;
+    Image* image_;
+    std::wstring reportPath_ = (paths_.moduleDir / L"HTReload.probe.txt").wstring();
     std::set<std::wstring> handled_;
     std::map<std::wstring, Pending> pending_;
     bool disabled_ = false;
@@ -274,21 +418,18 @@ private:
 
 void Run() {
     Paths paths = MakePaths();
-    // Keep the previous run's log: it is the only record left if that run ended in a crash.
-    fs::path logPath = paths.moduleDir / L"HTReload.log";
-    MoveFileExW(logPath.c_str(), (paths.moduleDir / L"HTReload.prev.log").c_str(), MOVEFILE_REPLACE_EXISTING);
-    LogOpen(logPath.wstring());
-    Log("HTReload %s，监视目录: %s", kVersion, Utf8(paths.paksDir.wstring()).c_str());
+    Log("核心 %s，监视目录: %s", kVersion, Utf8(paths.paksDir.wstring()).c_str());
 
     Image image;
     if (!image.Open()) {
         Log("失败: 无法读取游戏主模块");
         return;
     }
-    Log("主模块 %#zx 大小 %#zx", image.base, image.end - image.base);
 
-    // The plugin loads before the game's own entry point runs; give the unpacker a moment first.
-    Sleep(3000);
+    // At game start the plugin loads before the game's own entry point runs; give the unpacker a moment.
+    if (g_host->generation == 0 && WaitStop(3000)) {
+        return;
+    }
 
     Resolver resolver;
     for (int attempt = 1;; ++attempt) {
@@ -300,19 +441,24 @@ void Run() {
             Log("放弃: 一直没能定位挂载入口，本次运行不提供热重载");
             return;
         }
-        Sleep(attempt < 15 ? 1000 : 5000);
+        if (WaitStop(attempt < 15 ? 1000 : 5000)) {
+            return;
+        }
     }
 
     // The delegate is bound right after the engine's startup scan, so everything on disk now is mounted.
-    Watcher watcher(paths, resolver.Api(), FindCollectGarbageThunk(image));
+    uintptr_t collectGarbage = FindCollectGarbageThunk(image);
+    ObjectSystem objects;
+    Watcher watcher(paths, resolver.Api(), collectGarbage, &objects, &image);
 
-    while (!GameThread_Attach()) {
-        Sleep(1000);
+    while (!GameThread_Ready()) {
+        if (WaitStop(1000)) {
+            return;
+        }
     }
-    Log("就绪: 已接入游戏线程，开始监视新包");
+    Log("就绪: 开始监视新包和指令");
 
-    for (;;) {
-        Sleep(1000);
+    while (!WaitStop(1000)) {
         watcher.Poll();
     }
 }
@@ -330,13 +476,25 @@ DWORD WINAPI Worker(void*) {
 
 }  // namespace
 
-BOOL APIENTRY DllMain(HMODULE module, DWORD reason, void*) {
-    if (reason == DLL_PROCESS_ATTACH) {
-        g_module = module;
-        DisableThreadLibraryCalls(module);
-        if (IsGameProcess()) {
-            CloseHandle(CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr));
-        }
+extern "C" __declspec(dllexport) bool CoreStart(const CoreHost* host) {
+    if (!host || host->abi != kCoreHostAbi) {
+        return false;
     }
-    return TRUE;
+    g_host = host;
+    LogAttach(host);
+    GameThread_Attach(host);
+    g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    g_worker = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+    return g_worker != nullptr;
+}
+
+extern "C" __declspec(dllexport) bool CoreStop() {
+    SetEvent(g_stop);
+    bool stopped = WaitForSingleObject(g_worker, 60000) == WAIT_OBJECT_0;
+    if (stopped) {
+        GameThread_Clear();
+        CloseHandle(g_worker);
+        CloseHandle(g_stop);
+    }
+    return stopped;
 }

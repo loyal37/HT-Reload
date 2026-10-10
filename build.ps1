@@ -1,4 +1,5 @@
-# Builds build\HTReload.asi (and, with -Test, the stand-in host used by test\run.ps1).
+# Builds the shell (build\HTReload.asi) and the core (build\HTReload.core.dll), and with -Test the
+# stand-in host used by test\run.ps1.
 # Keep this file ASCII: Windows PowerShell 5.1 reads BOM-less scripts in the system code page.
 param([switch]$Test)
 
@@ -10,7 +11,7 @@ if (-not $vs) { throw 'Visual Studio with the C++ x64 toolset was not found.' }
 $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
 
 $out = Join-Path $root 'build'
-$flags = '/nologo /utf-8 /std:c++20 /O2 /MT /EHsc /W4 /DUNICODE /D_UNICODE /DNOMINMAX /DWIN32_LEAN_AND_MEAN'
+$flags = "/nologo /utf-8 /std:c++20 /O2 /MT /EHsc /W4 /DUNICODE /D_UNICODE /DNOMINMAX /DWIN32_LEAN_AND_MEAN /I`"$root\src`""
 
 function Invoke-Cl([string]$objDir, [string]$arguments) {
     New-Item -ItemType Directory -Force $objDir | Out-Null
@@ -21,13 +22,18 @@ function Invoke-Cl([string]$objDir, [string]$arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)" }
 }
 
-$sources = (Get-ChildItem (Join-Path $root 'src') -Filter *.cpp | ForEach-Object { '"' + $_.FullName + '"' }) -join ' '
-Invoke-Cl (Join-Path $out 'obj') "/LD $sources /Fe`"$out\HTReload.asi`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
+function Sources([string]$folder) {
+    (Get-ChildItem (Join-Path $root $folder) -Filter *.cpp | ForEach-Object { '"' + $_.FullName + '"' }) -join ' '
+}
+
+Invoke-Cl (Join-Path $out 'obj\core') "/LD $(Sources 'src') /Fe`"$out\HTReload.core.dll`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
+Write-Host "Built $out\HTReload.core.dll"
+Invoke-Cl (Join-Path $out 'obj\shell') "/LD $(Sources 'shell') /Fe`"$out\HTReload.asi`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
 Write-Host "Built $out\HTReload.asi"
 
 if ($Test) {
     $hostDir = Join-Path $out 'test\HT\Binaries\Win64'
     New-Item -ItemType Directory -Force $hostDir | Out-Null
-    Invoke-Cl (Join-Path $out 'test\obj') "`"$root\test\host.cpp`" /Fe`"$hostDir\HTGame.exe`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
+    Invoke-Cl (Join-Path $out 'test\obj') "`"$root\test\host.cpp`" `"$root\src\cityhash.cpp`" /Fe`"$hostDir\HTGame.exe`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
     Write-Host "Built $hostDir\HTGame.exe"
 }

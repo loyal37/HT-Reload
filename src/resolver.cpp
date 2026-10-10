@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstring>
 
 #include "log.h"
 
@@ -17,40 +18,6 @@ constexpr size_t kInstanceWords = 12;
 
 bool Has(const std::vector<uintptr_t>& values, uintptr_t value) {
     return std::find(values.begin(), values.end(), value) != values.end();
-}
-
-// Remembers recently queried regions so that probing many heap pointers stays cheap and fault-free.
-class ReadableCache {
-public:
-    bool Readable(uintptr_t address, size_t size) {
-        for (const Entry& entry : entries_) {
-            if (address >= entry.begin && address < entry.end) {
-                return entry.readable && address + size <= entry.end;
-            }
-        }
-        MEMORY_BASIC_INFORMATION info{};
-        if (!VirtualQuery(reinterpret_cast<const void*>(address), &info, sizeof info)) {
-            return false;
-        }
-        Entry& entry = entries_[next_++ % std::size(entries_)];
-        entry.begin = reinterpret_cast<uintptr_t>(info.BaseAddress);
-        entry.end = entry.begin + info.RegionSize;
-        entry.readable = info.State == MEM_COMMIT && !(info.Protect & (PAGE_GUARD | PAGE_NOACCESS));
-        return entry.readable && address + size <= entry.end;
-    }
-
-private:
-    struct Entry {
-        uintptr_t begin = 0;
-        uintptr_t end = 0;
-        bool readable = false;
-    };
-    Entry entries_[8];
-    size_t next_ = 0;
-};
-
-bool PlausibleHeapPointer(const Image& image, uintptr_t value) {
-    return value >= 0x10000 && value < 0x00007FFFFFFF0000 && (value & 7) == 0 && !image.Contains(value);
 }
 
 // A heap object whose vtable lives in the game image.
@@ -138,6 +105,21 @@ uintptr_t FindCollectGarbageThunk(const Image& image) {
     Log("垃圾回收: execCollectGarbage RVA %#zx", thunks[0] - image.base);
     LogBytes("入口", thunks[0], 0x40);
     return thunks[0];
+}
+
+uintptr_t FindEngineGlobal(uintptr_t collectGarbageThunk) {
+    uint8_t code[0x40];
+    if (!collectGarbageThunk || !SafeRead(collectGarbageThunk, code, sizeof code)) {
+        return 0;
+    }
+    for (size_t i = 0; i + 7 <= sizeof code; ++i) {
+        if (code[i] == 0x48 && code[i + 1] == 0x8B && code[i + 2] == 0x0D) {
+            int32_t displacement;
+            memcpy(&displacement, code + i + 3, sizeof displacement);
+            return collectGarbageThunk + i + 7 + displacement;
+        }
+    }
+    return 0;
 }
 
 bool Resolver::Step(const Image& image) {

@@ -8,8 +8,12 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <cwchar>
 #include <iterator>
+
+#include "cityhash.h"
 
 struct EngineString {
     const wchar_t* data;
@@ -26,6 +30,7 @@ __declspec(noinline) void DebugPrint(const wchar_t* format, ...) {
 
 int g_result = -1;
 bool g_mounted = false;
+bool g_collected = false;
 DWORD g_mainThread = GetCurrentThreadId();
 
 // --- generated-code look-alikes -------------------------------------------------------------
@@ -81,11 +86,11 @@ __declspec(noinline) void ExecBeep(void*, Frame& stack, void* result) {
 // Requests a collection the way the engine's thunk does: no arguments read, nothing returned.
 __declspec(noinline) void ExecCollectGarbage(void*, Frame& stack, void*) {
     stack.code += !!stack.code;
-    if (g_mounted) {
+    if (g_mounted && !g_collected) {
         bool ok = GetCurrentThreadId() == g_mainThread && g_result == 0;
         wprintf(L"host: collect garbage requested after mount -> %s\n", ok ? L"OK" : L"UNEXPECTED");
         g_result = ok ? 0 : 5;
-        PostQuitMessage(0);
+        g_collected = true;
     }
 }
 
@@ -110,6 +115,150 @@ extern const NamePtrPair g_natives[] = {
     {"BreakA", ExecPrint},     {"BreakB", ExecCount},     {"CapsuleA", ExecBeep},  {"CollectGarbage", ExecCollectGarbage},
     {"ComponentA", ExecPrint}, {"ComponentB", ExecBeep},  {"ConvA", ExecCount},
 };
+
+// --- object table and name pool look-alikes -------------------------------------------------
+
+// FNameEntryAllocator: the plugin recognises it by the first two entries of block 0.
+struct NamePool {
+    void* lock;
+    unsigned currentBlock;
+    unsigned cursor;
+    unsigned char* blocks[8192];
+} g_namePool;
+
+unsigned AddName(const char* text) {
+    if (!g_namePool.blocks[0]) {
+        g_namePool.blocks[0] = static_cast<unsigned char*>(calloc(1, 0x20000));
+    }
+    unsigned short length = static_cast<unsigned short>(strlen(text));
+    unsigned short header = static_cast<unsigned short>(length << 6);
+    unsigned id = g_namePool.cursor / 2;
+    memcpy(g_namePool.blocks[0] + g_namePool.cursor, &header, 2);
+    memcpy(g_namePool.blocks[0] + g_namePool.cursor + 2, text, length);
+    g_namePool.cursor += (2 + length + 1u) & ~1u;
+    return id;
+}
+
+// UObjectBase: vtable, flags, index, class, name, outer.
+struct Object {
+    virtual ~Object() = default;
+    unsigned objectFlags = 0;
+    int internalIndex = 0;
+    Object* klass = nullptr;
+    unsigned nameId = 0;
+    unsigned nameNumber = 0;
+    Object* outer = nullptr;
+};
+
+struct Class : Object {
+    void* structFields[6] = {};
+    int propertiesSize = 0;
+    int minAlignment = 8;
+};
+
+struct Field : Object {
+    Object* next = nullptr;
+};
+
+struct Keeper : Object {
+    void* slots[4] = {};
+};
+
+// FUObjectItem and the FChunkedFixedUObjectArray that GUObjectArray wraps.
+struct ObjectItem {
+    Object* object;
+    int flags;
+    int clusterRootIndex;
+    int serialNumber;
+    int refCount;
+};
+
+struct ObjectArray {
+    int firstGCIndex;
+    int lastNonGCIndex;
+    int maxObjectsNotConsideredByGC;
+    bool openForDisregardForGC;
+    ObjectItem** chunks;
+    ObjectItem* preAllocated;
+    int maxElements;
+    int numElements;
+    int maxChunks;
+    int numChunks;
+} g_objectArray;
+
+template <class T>
+T* NewObject(Class* klass, const char* name, Object* outer, int internalFlags = 0) {
+    T* object = new T;
+    object->klass = klass ? klass : static_cast<Class*>(static_cast<Object*>(object));
+    object->nameId = AddName(name);
+    object->outer = outer;
+    object->internalIndex = g_objectArray.numElements++;
+    g_objectArray.chunks[0][object->internalIndex] = {object, internalFlags, 0, 0, 0};
+    return object;
+}
+
+Class* NewClass(Class* classClass, const char* name, Object* outer, int size) {
+    Class* klass = NewObject<Class>(classClass, name, outer);
+    klass->propertiesSize = size;
+    return klass;
+}
+
+const wchar_t kTestPackage[] = L"/game/characters/test/t_body";
+
+// A mounted package with one texture, kept alive directly by one object, through the heap storage
+// of another, and by nothing else.
+void BuildObjectSystem() {
+    AddName("None");
+    AddName("ByteProperty");
+    g_objectArray.maxElements = 2 * 65536;
+    g_objectArray.maxChunks = 2;
+    g_objectArray.numChunks = 1;
+    g_objectArray.chunks = new ObjectItem*[2]{static_cast<ObjectItem*>(calloc(65536, sizeof(ObjectItem))), nullptr};
+
+    Class* classClass = NewObject<Class>(nullptr, "Class", nullptr);
+    classClass->propertiesSize = sizeof(Class);
+    Class* packageClass = NewClass(classClass, "Package", nullptr, sizeof(Object));
+    Object* corePackage = NewObject<Object>(packageClass, "/Script/CoreUObject", nullptr);
+    classClass->outer = corePackage;
+    packageClass->outer = corePackage;
+    Class* objectClass = NewClass(classClass, "Object", corePackage, sizeof(Object));
+    NewClass(classClass, "Field", corePackage, sizeof(Field));
+    Class* textureClass = NewClass(classClass, "Texture2D", corePackage, sizeof(Object));
+    Class* keeperClass = NewClass(classClass, "Keeper", corePackage, sizeof(Keeper));
+
+    Object* modPackage = NewObject<Object>(packageClass, "/Game/Characters/Test/T_Body", nullptr);
+    Object* texture = NewObject<Object>(textureClass, "T_Body", modPackage, 1 << 30);
+    Object* otherPackage = NewObject<Object>(packageClass, "/Game/Other", nullptr);
+    Keeper* direct = NewObject<Keeper>(keeperClass, "DirectKeeper", otherPackage);
+    direct->slots[1] = texture;
+    Keeper* indirect = NewObject<Keeper>(keeperClass, "ArrayKeeper", otherPackage);
+    void** storage = new void*[8]{};
+    storage[3] = texture;
+    indirect->slots[2] = storage;
+    for (int i = 0; i < 1500; ++i) {
+        NewObject<Object>(objectClass, "Filler", otherPackage);
+    }
+}
+
+// Minimal IoStore table of contents naming one package, as the plugin reads it.
+int WriteUtoc(const wchar_t* path) {
+    unsigned char toc[144 + 12] = {};
+    memcpy(toc, "-==--==--==--==-", 16);
+    unsigned headerSize = 144;
+    unsigned entryCount = 1;
+    memcpy(toc + 20, &headerSize, 4);
+    memcpy(toc + 24, &entryCount, 4);
+    unsigned long long id = CityHash64(reinterpret_cast<const char*>(kTestPackage), sizeof kTestPackage - sizeof(wchar_t));
+    memcpy(toc + 144, &id, 8);
+    toc[144 + 11] = 1;
+    FILE* file = nullptr;
+    if (_wfopen_s(&file, path, L"wb") || !file) {
+        return 6;
+    }
+    fwrite(toc, 1, sizeof toc, file);
+    fclose(file);
+    return 0;
+}
 
 // --- pak platform file look-alike -----------------------------------------------------------
 
@@ -157,8 +306,11 @@ struct Delegate {
 
 Delegate g_mountPak;
 
-int wmain(int argc, wchar_t**) {
+int wmain(int argc, wchar_t** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
+    if (argc == 3 && wcscmp(argv[1], L"--write-utoc") == 0) {
+        return WriteUtoc(argv[2]);
+    }
     if (!LoadLibraryW(L"HTReload.asi")) {
         wprintf(L"host: cannot load HTReload.asi (%lu)\n", GetLastError());
         return 4;
@@ -196,6 +348,11 @@ int wmain(int argc, wchar_t**) {
             window = CreateWindowExW(0, L"UnrealWindow", L"host", WS_OVERLAPPEDWINDOW, 0, 0, 200, 100, nullptr,
                                      nullptr, windowClass.hInstance, nullptr);
         }
+        // Later still, so that the plugin's first look for the object table comes too early and it
+        // has to try again when a pak is mounted.
+        if (!g_objectArray.chunks && elapsed > 6500) {
+            BuildObjectSystem();
+        }
         MSG message;
         while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
             if (message.message == WM_QUIT) {
@@ -204,8 +361,12 @@ int wmain(int argc, wchar_t**) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-        if (elapsed > 60000) {
-            wprintf(L"host: timed out waiting for a mount call followed by a collection request\n");
+        // The test script ends the run by creating this file once it has seen everything it checks.
+        if (GetFileAttributesW(L"host.quit") != INVALID_FILE_ATTRIBUTES) {
+            running = false;
+        }
+        if (elapsed > 120000) {
+            wprintf(L"host: timed out waiting to be told to quit\n");
             return 2;
         }
         Sleep(16);
