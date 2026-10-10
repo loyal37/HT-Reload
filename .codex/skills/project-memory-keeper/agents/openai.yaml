@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Memory Keeper"
+  short_description: "Persist project state in Markdown"
+  default_prompt: "Use $project-memory-keeper to restore project context and keep .ai-memory files current."
