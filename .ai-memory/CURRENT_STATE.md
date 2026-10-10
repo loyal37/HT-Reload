@@ -11,7 +11,8 @@
   - 新增只读查看指令（`objects`、`obj`、`mem`、`vtable`、`code`、`strref`、`astrref`、`callers`、`names`、`refs`），答案写到 `HTReload.out.txt`。
   - 去掉了挂载后自动探测和它的提示音，探测只由指令触发。
 - 指令文件用法：在游戏 `Win64` 写 `HTReload.cmd.txt`，每行一条，核心每秒检查、读完即删。日志里每条指令开始和结束各一行（`指令: …`、`指令完成: …`）。探测报告追加到 `HTReload.probe.txt`，其他答案覆盖写入 `HTReload.out.txt`。
-- git：`origin` = `https://github.com/loyal37/HT-Reload`（私有）。远程 `main` 停在 `df1eb0d`（v0.2.0 加记忆更新）。**v0.3.x、v0.4.0 的代码和之后的记忆更新都还没提交。**
+- git：`origin` = `https://github.com/loyal37/HT-Reload`（私有）。v0.3.0 到 v0.4.0 的全部改动合在一个提交 `905f86040d720dd20f410f327b3efff38d3a5eb8` 里，已推送到 `main` 并核对远程一致；之后只有记忆文件的更新提交。没有标签，没有 Release。
+- **用户规定（2026-10-10）：每次改完都要提交，不能攒着。** 见 PROJECT_OVERVIEW 的长期约束。
 
 ## 已在真游戏里确认的事
 

@@ -52,7 +52,8 @@ Do not rely only on conversation history to decide what the project currently do
 - Before changing how the mount entry is located, how it is called, or how packages are named, check `.ai-memory/DECISIONS.md`.
 - Record new long-term constraints, important bugs, or architectural choices as soon as they appear.
 - Keep changes scoped to the user's request.
-- Run `test\run.ps1` before deploying. Deploy only while the game is closed.
+- Run `test\run.ps1` before deploying. The core may be deployed while the game runs; a changed shell needs the game closed.
+- Commit after every round of changes once the test passes. Do not let work pile up uncommitted.
 - Keep `.ps1` files ASCII-only.
 - Never add anything that hides the plugin from, or works around, the game's anti-cheat.
 
