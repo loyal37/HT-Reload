@@ -65,6 +65,14 @@
 - 黑鸟不出场时角色对象照样活在关卡里，所以队伍内切换从来不会刷新资产。
 - 返回登录界面再进入可以完全刷新（老办法，重载失败时的退路）。
 
+## 打包器的自动编号（2026-10-10，打包器 2.6）
+
+- 打包器在另一个仓库：`D:\Neverness to Everness Mod Loader\cook\packager`（WPF，.NET 8，`build.ps1` 生成根目录的 `NTE-Mod-Packager.exe`，这个 exe 是入库的）。
+- 新增“自动编号”勾选框，默认关闭、记住状态。用户的设置里已经替他勾上（`%LOCALAPPDATA%\NTE Mod Packager\settings.json` 的 `AutoNumber: true`）。
+- 规则（`src/NteModPackager/Services/OutputNaming.cs`）：名称照常输入；输出名是“输出目录里同一个模组已有的最大编号 + 1”，名称里自己写的编号只当起点。`blackbird_5_P` 在已有 5 时输出 `blackbird_6_P`；`blackbird_P` 从 1 开始。不以 `_P` 结尾的不编号。名字在生成容器之前就定好。
+- 验证：`dotnet run --project tests/NteModPackager.Smoke -- naming` 通过；用界面自动化在临时输出目录做了一次真实打包，已有 5 时生成了 `blackbird_6_P` 三件套，打包后预览变成 7。**没有往游戏目录打过包**，和 HT Reload 连起来的第一次由用户来做。
+- 本地提交 `de16cb0`，没有推送（推送会更新公开仓库里的 exe，用户没要求）。
+
 ## Next step
 
 1. 目前没有在等的验证。主流程（挂载、重载、卸载、删除）都已在真游戏里走通。
