@@ -91,6 +91,18 @@
 - 报告：自动重载写到 `Win64\HTReload.reload.txt`，摘要行进日志（前缀“重载:”）；手动指令的报告在 `HTReload.out.txt`。
 - 提示音：挂载成功两声上行；重载完成再加一声更高的；重载没完成或挂载失败是一声低音。
 
+## 卸载旧容器（核心 0.7.0）
+
+- 目的：已挂载容器的 `.ucas`、`.utoc` 被引擎锁着，旧版本在游戏运行时删不掉。卸载后引擎关闭文件，就能删了。插件只卸载，不删文件。
+- 定位（`resolver.cpp` 的 `FindUnmountHandler`）：日志文字 `Unmounting pak file: %s \n`（游戏文件里正好一处，紧挨着挂载那句）→ 引用它的函数 → 在主模块可写数据和它指向的堆块里找“已知的 `FPakPlatformFile` 对象 + 该函数”相邻的一对，即 `FCoreDelegates::OnUnmountPak` 的委托实例。必须正好一个。启动时找一次，没找到的话用到时再找。
+- 调用：`bool HandleUnmountPakDelegate(FPakPlatformFile* this, const FString& PakFilePath)`，路径和挂载时的写法相同，游戏线程，SEH 包着，抛异常就停用后续卸载。
+- 哪些容器可以卸（`Watcher::ShadowedContainers`）：Mod 容器 A 满足“存在另一个已挂载的 Mod 容器 B，B 的补丁序数严格大于 A，且 A 的每个包 ID 都在 B 里”。
+  - 已挂载 = 插件认为挂载过（启动时在磁盘上，或本次运行挂载成功）并且它的 `.ucas` 此刻被人占着不让删（`HeldOpen`，只申请删除权限、不真删）。两个条件都要，因为打包器正在写的文件也是被占着的。
+  - 补丁序数 `PatchRank` 照搬引擎 `FPakPlatformFile::Mount` 的算法：没有 `_P` 是 0，`<名字>_<N>_P` 是 N+1，其余 `_P` 是 1。
+- 什么时候卸（`Watcher::UnmountWhenCollected`）：重载结果是完成或“没有需要重载的”之后 6 秒开始看，每 5 秒一次，最多到 30 秒。条件是没有任何带 `_HTOLD_` 的包还活着（`Reloader::RetiredPackagesAlive`）。到点还有活着的就放弃，旧容器保持挂载。重载失败不卸。
+- 卸完用 `HeldOpen` 复查文件是否真的放开，结果进日志（前缀“卸载:”）。
+- 指令：`shadowed` 只列出，`unmount` 手动执行同一套逻辑。
+
 ## 对象系统和引用探测（v0.3.0，只读诊断）
 
 - `objects.{h,cpp}`：`ObjectSystem` 按形状在主模块可写数据里找两样东西，不依赖地址。
