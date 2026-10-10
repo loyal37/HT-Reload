@@ -16,6 +16,8 @@
 //   callers <rva>            functions that call or jump straight to the code at rva
 //   names <text> [max]       ids of pooled names containing text
 //   refs <address>           every engine-owned slot holding that address
+//   functions <class>        script functions declared by that class, with parameter sizes
+//   props <struct> [text]    reflected properties of a class, struct or function and of its parents
 // Returns false when `command` is none of these.
 bool Explore(const std::string& command, const std::string& arguments, const Image& image, const ObjectSystem& objects,
              std::string& out);

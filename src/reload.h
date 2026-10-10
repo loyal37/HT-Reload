@@ -26,6 +26,10 @@ public:
     // Lists what a reload of these packages would do. Read-only.
     void Plan(const std::vector<uint64_t>& packageIds, std::string& report);
 
+    // Changes engine state: the whole reload. Renames the loaded packages, loads them again, makes
+    // everything that used the old assets use the new ones. The old ones go with the next collection.
+    void Reload(const std::vector<uint64_t>& packageIds, std::string& report);
+
     // Changes engine state: renames the loaded package that holds the asset `assetName` and loads the
     // asset again. Nothing is repointed, so the game keeps using the old copy; this only proves that
     // the two copies can exist side by side.

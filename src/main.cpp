@@ -31,7 +31,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.5.0";
+const char kVersion[] = "0.6.0";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -296,6 +296,7 @@ private:
     //   calltest                call a harmless script function through the engine
     //   plan [filter]           list what a reload of those containers would do
     //   renameload <asset>      WRITES: rename the package holding that asset and load the asset again
+    //   reload [filter]         WRITES: replace the loaded assets of those containers by fresh copies
     void RunCommands() {
         fs::path path = paths_.moduleDir / L"HTReload.cmd.txt";
         std::error_code error;
@@ -363,6 +364,13 @@ private:
             reloader_.Plan(ModPackageIds(first), answers);
         } else if (command == "renameload") {
             reloader_.RenameAndLoad(first, answers);
+        } else if (command == "reload") {
+            reloader_.Reload(ModPackageIds(first), answers);
+            // The old assets are unreferenced now; let the engine take them away.
+            if (collectGarbage_ && !collectFailed_->load()) {
+                collectUntil_ = GetTickCount64() + 20000;
+                nextCollect_ = 0;
+            }
         } else if (!Explore(command, arguments, *image_, *objects_, answers)) {
             answers += "不认识的指令\r\n";
         }

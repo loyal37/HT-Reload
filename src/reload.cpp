@@ -6,6 +6,7 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <iterator>
 
 #include "game_thread.h"
@@ -31,17 +32,60 @@ void Append(std::string& out, const char* format, ...) {
 // How a slot that points at an old asset has to be dealt with.
 enum class SlotKind {
     LiveMeshComponent,  // re-set the mesh through the engine so render state and anim instances are rebuilt
+    DynamicMaterial,    // store the new parent, then have the material re-send its state to the renderer
     Rewrite,            // plain data: store the new pointer
     Leave,              // an object that is expected to die with the old assets
 };
 
-SlotKind Classify(const ObjectView& view, const Superseded& set, const ReferenceSlot& slot) {
+const char* Label(SlotKind kind) {
+    switch (kind) {
+        case SlotKind::LiveMeshComponent: return "[重设网格]";
+        case SlotKind::DynamicMaterial:   return "[换父材质]";
+        case SlotKind::Rewrite:           return "[改写]    ";
+        default:                          return "[不动]    ";
+    }
+}
+
+// Offset of the reflected property `propertyName` that the class `className` declares, or -1.
+// UStruct::ChildProperties is at 0x50; FField has its next at 0x18 and name at 0x20; FProperty its offset at 0x44.
+int32_t PropertyOffset(const ObjectSystem& system, const ObjectView& view, const char* className, const char* propertyName) {
+    for (size_t i = 0; i < view.All().size(); ++i) {
+        int32_t index = static_cast<int32_t>(i);
+        if (view.Name(index) != className || view.ClassName(index) != "Class") {
+            continue;
+        }
+        uintptr_t property = 0;
+        SafeRead(view[index].address + 0x50, &property, sizeof property);
+        for (int guard = 0; property && guard < 4000; ++guard) {
+            uint8_t raw[0x48];
+            if (!SafeRead(property, raw, sizeof raw)) {
+                break;
+            }
+            uint32_t name[2];
+            int32_t offset;
+            memcpy(name, raw + 0x20, sizeof name);
+            memcpy(&offset, raw + 0x44, sizeof offset);
+            if (system.Name(name[0], name[1]) == propertyName) {
+                return offset;
+            }
+            memcpy(&property, raw + 0x18, sizeof property);
+        }
+    }
+    return -1;
+}
+
+SlotKind Classify(const ObjectView& view, const Superseded& set, const ReferenceSlot& slot, int32_t materialParentOffset) {
     const ObjectInfo& owner = view[slot.owner];
-    // Dynamic materials cache their parent on the render thread, and instances of a superseded class
-    // cannot be turned into instances of the new one. Both are recreated when the mesh is re-set.
-    bool ownerClassSuperseded = std::binary_search(set.objects.begin(), set.objects.end(), view.IndexOf(owner.klass));
-    if (ownerClassSuperseded || view.IsA(slot.owner, "MaterialInstanceDynamic")) {
+    // An instance of a superseded class cannot be turned into an instance of the new one. The anim
+    // instances among them are recreated when the mesh is re-set.
+    if (std::binary_search(set.objects.begin(), set.objects.end(), view.IndexOf(owner.klass))) {
         return SlotKind::Leave;
+    }
+    // The game keeps its dynamic materials in containers of its own, so they have to stay the same
+    // objects and take the new material as their parent.
+    if (view.IsA(slot.owner, "MaterialInstanceDynamic")) {
+        bool isParent = materialParentOffset >= 0 && slot.location == owner.address + static_cast<uintptr_t>(materialParentOffset);
+        return isParent ? SlotKind::DynamicMaterial : SlotKind::Leave;
     }
     // Only a component that sits in a level has render state and anim instances to rebuild; the ones in
     // class defaults and in sequence templates are plain data.
@@ -78,6 +122,89 @@ std::wstring Widen(const std::string& text) {
     std::wstring wide(static_cast<size_t>(std::max(length, 0)), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), length);
     return wide;
+}
+
+// Stores `value` in a pointer slot if it still holds `expected`.
+bool ReplacePointer(uintptr_t location, uintptr_t expected, uintptr_t value) {
+    __try {
+        uintptr_t* slot = reinterpret_cast<uintptr_t*>(location);
+        if (*slot != expected) {
+            return false;
+        }
+        *slot = value;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Everything a reload does, worked out ahead of time so that the game thread only has to carry it out.
+struct ReloadWork {
+    struct Package {
+        uintptr_t address;
+        std::string name;
+        std::wstring retiredName;
+        bool renamed = false;
+    };
+    struct Asset {
+        int32_t index;  // in the view
+        uintptr_t oldAddress;
+        LoadAssetParams params;
+        std::string label;
+    };
+    struct Slot {
+        SlotKind kind;
+        uintptr_t location;
+        uintptr_t owner;
+        uintptr_t oldTarget;
+        int32_t asset;  // which asset the slot points at, or -1 if it is not one of the reloaded assets
+        std::string label;
+        const char* outcome = "";
+    };
+    std::vector<Package> packages;
+    std::vector<Asset> assets;
+    std::vector<Slot> slots;
+};
+
+ReloadWork PrepareWork(const ObjectSystem& system, const ObjectView& view, const Superseded& set) {
+    ReloadWork work;
+    char suffix[32];
+    snprintf(suffix, sizeof suffix, "%s%llx", kRetiredMark, GetTickCount64());
+    for (int32_t package : set.packages) {
+        std::string name = view.Name(package);
+        work.packages.push_back({view[package].address, name, Widen(name + suffix)});
+    }
+    // The assets to load are the public objects directly inside the packages, class defaults excepted:
+    // those come along with their class.
+    for (int32_t object : set.objects) {
+        const ObjectInfo& info = view[object];
+        int32_t package = view.IndexOf(info.outer);
+        if (package < 0 || view[package].outer != 0 || !(info.objectFlags & kObjectPublic) || (info.objectFlags & kObjectClassDefault)) {
+            continue;
+        }
+        ReloadWork::Asset asset{object, info.address, {}, view.ClassName(object) + " " + view.Name(object)};
+        asset.params.packageNameId = view[package].nameId;
+        asset.params.packageNameNumber = view[package].nameNumber;
+        asset.params.assetNameId = info.nameId;
+        asset.params.assetNameNumber = info.nameNumber;
+        work.assets.push_back(asset);
+    }
+    int32_t parentOffset = PropertyOffset(system, view, "MaterialInstance", "Parent");
+    for (const ReferenceSlot& slot : set.slots) {
+        int32_t asset = -1;
+        for (size_t i = 0; i < work.assets.size(); ++i) {
+            if (work.assets[i].index == slot.target) {
+                asset = static_cast<int32_t>(i);
+            }
+        }
+        char offset[32];
+        snprintf(offset, sizeof offset, " +%#zx", slot.location - view[slot.owner].address);
+        work.slots.push_back({Classify(view, set, slot, parentOffset), slot.location, view[slot.owner].address,
+                              view[slot.target].address, asset,
+                              view.ClassName(slot.owner) + " " + view.Path(slot.owner) + offset + " -> " + view.ClassName(slot.target) +
+                                  " " + view.Name(slot.target)});
+    }
+    return work;
 }
 
 }  // namespace
@@ -187,29 +314,134 @@ void Reloader::RenameAndLoad(const std::string& assetName, std::string& report) 
 void Reloader::Plan(const std::vector<uint64_t>& packageIds, std::string& report) {
     ObjectView view(objects_);
     Superseded set = FindSuperseded(view, packageIds, true);
+    ReloadWork work = PrepareWork(objects_, view, set);
     Append(report, "新包里的包 %zu 个，其中已加载 %zu 个，旧对象共 %zu 个，其他对象里指向它们的槽位 %zu 处", packageIds.size(),
            set.packages.size(), set.objects.size(), set.slots.size());
 
     Append(report, "---- 第一步: 给这些旧包改名 ----");
-    for (int32_t package : set.packages) {
-        Append(report, "%#zx  %s", view[package].address, view.Name(package).c_str());
+    for (const ReloadWork::Package& package : work.packages) {
+        Append(report, "%#zx  %s", package.address, package.name.c_str());
     }
-
     Append(report, "---- 第二步: 重新加载这些资产（包里的顶层公开对象）----");
-    for (int32_t object : set.objects) {
-        const ObjectInfo& info = view[object];
-        int32_t outer = view.IndexOf(info.outer);
-        if (outer >= 0 && view[outer].outer == 0 && (info.objectFlags & kObjectPublic) && !(info.objectFlags & kObjectClassDefault)) {
-            Append(report, "%#zx  %s  %s", info.address, view.ClassName(object).c_str(), view.Path(object).c_str());
+    for (const ReloadWork::Asset& asset : work.assets) {
+        Append(report, "%#zx  %s", asset.oldAddress, asset.label.c_str());
+    }
+    Append(report, "---- 第三步: 处理指向旧对象的槽位 ----");
+    for (const ReloadWork::Slot& slot : work.slots) {
+        Append(report, "%s  %s", Label(slot.kind), slot.label.c_str());
+    }
+}
+
+void Reloader::Reload(const std::vector<uint64_t>& packageIds, std::string& report) {
+    if (!calls_.Ready() && !Resolve(report)) {
+        return;
+    }
+    ObjectView view(objects_);
+    Superseded set = FindSuperseded(view, packageIds, true);
+    ReloadWork work = PrepareWork(objects_, view, set);
+
+    uintptr_t library = 0;
+    for (size_t i = 0; i < view.All().size(); ++i) {
+        if (view.Name(static_cast<int32_t>(i)) == "Default__KismetSystemLibrary") {
+            library = view.All()[i].address;
         }
     }
+    uintptr_t loadAsset = FindFunction(objects_, view.All(), "KismetSystemLibrary", "LoadAsset_Blocking");
+    uintptr_t setMesh = FindFunction(objects_, view.All(), "SkeletalMeshComponent", "SetSkeletalMeshAsset");
+    uintptr_t copyOverrides = FindFunction(objects_, view.All(), "MaterialInstanceDynamic", "CopyParameterOverrides");
+    if (work.packages.empty() || work.assets.empty() || !library || calls_.ParamsSize(loadAsset) != sizeof(LoadAssetParams) ||
+        calls_.ParamsSize(setMesh) != sizeof(uintptr_t) || calls_.ParamsSize(copyOverrides) != sizeof(uintptr_t)) {
+        Append(report, "条件不满足: 旧包 %zu 个，资产 %zu 个，库对象 %#zx，加载 %#zx，设网格 %#zx，材质同步 %#zx", work.packages.size(),
+               work.assets.size(), library, loadAsset, setMesh, copyOverrides);
+        return;
+    }
 
-    Append(report, "---- 第三步: 处理指向旧对象的槽位 ----");
-    for (const ReferenceSlot& slot : set.slots) {
-        SlotKind kind = Classify(view, set, slot);
-        Append(report, "%s  %s %s +%#zx（标志 %#x）-> %s %s",
-               kind == SlotKind::LiveMeshComponent ? "[重设网格]" : kind == SlotKind::Rewrite ? "[改写]    " : "[不动]    ",
-               view.ClassName(slot.owner).c_str(), view.Path(slot.owner).c_str(), slot.location - view[slot.owner].address,
-               view[slot.owner].objectFlags, view.ClassName(slot.target).c_str(), view.Name(slot.target).c_str());
+    // One task on the game thread, so that no garbage collection can run between loading the new
+    // assets and pointing the game at them: until then nothing references them.
+    const char* stopped = nullptr;
+    DWORD exceptionCode = 0;
+    auto call = [&](uintptr_t object, uintptr_t function, void* params, const char* what) {
+        if (!stopped && !CallProcessEvent(calls_, object, function, params, &exceptionCode)) {
+            stopped = what;
+        }
+        return !stopped;
+    };
+    bool ran = GameThread_RunAndWait(
+        [&] {
+            for (ReloadWork::Package& package : work.packages) {
+                if (!CallRename(calls_, package.address, package.retiredName.c_str(), &package.renamed, &exceptionCode) ||
+                    !package.renamed) {
+                    stopped = "改名";
+                    return;
+                }
+            }
+            for (ReloadWork::Asset& asset : work.assets) {
+                if (!call(library, loadAsset, &asset.params, "加载")) {
+                    return;
+                }
+            }
+            auto replacement = [&](const ReloadWork::Slot& slot) -> uintptr_t {
+                uintptr_t loaded = slot.asset < 0 ? 0 : work.assets[slot.asset].params.returnValue;
+                return loaded != slot.oldTarget ? loaded : 0;
+            };
+            // Plain data first, so that whatever the engine and the game do while the mesh is re-set
+            // already sees the new assets everywhere else.
+            for (ReloadWork::Slot& slot : work.slots) {
+                if (stopped) {
+                    return;
+                }
+                uintptr_t loaded = replacement(slot);
+                if (slot.kind == SlotKind::Rewrite) {
+                    slot.outcome = !loaded ? "没有对应的新资产" : ReplacePointer(slot.location, slot.oldTarget, loaded) ? "已改写" : "内容已变，未改";
+                } else if (slot.kind == SlotKind::DynamicMaterial) {
+                    if (!loaded || !ReplacePointer(slot.location, slot.oldTarget, loaded)) {
+                        slot.outcome = "未改";
+                    } else if (call(slot.owner, copyOverrides, &loaded, "材质同步")) {
+                        slot.outcome = "已换父材质";
+                    }
+                }
+            }
+            // A component has two slots for its mesh; re-setting it once covers both.
+            uintptr_t lastComponent = 0;
+            for (ReloadWork::Slot& slot : work.slots) {
+                uintptr_t loaded = replacement(slot);
+                if (slot.kind != SlotKind::LiveMeshComponent) {
+                    continue;
+                }
+                if (slot.owner == lastComponent) {
+                    slot.outcome = "同上";
+                } else if (!loaded) {
+                    slot.outcome = "没有对应的新资产";
+                } else if (call(slot.owner, setMesh, &loaded, "重设网格")) {
+                    slot.outcome = "已重设";
+                    lastComponent = slot.owner;
+                }
+            }
+        },
+        120000);
+
+    if (!ran) {
+        Append(report, "游戏线程没有执行");
+        return;
+    }
+    size_t renamed = 0;
+    size_t loaded = 0;
+    for (const ReloadWork::Package& package : work.packages) {
+        renamed += package.renamed;
+    }
+    for (const ReloadWork::Asset& asset : work.assets) {
+        loaded += asset.params.returnValue && asset.params.returnValue != asset.oldAddress;
+    }
+    Append(report, "改名 %zu/%zu 个包，重新加载出新对象 %zu/%zu 个", renamed, work.packages.size(), loaded, work.assets.size());
+    if (stopped) {
+        Append(report, "中止于“%s”，异常码 %#lx。之后的步骤没有执行", stopped, exceptionCode);
+    }
+    for (const ReloadWork::Asset& asset : work.assets) {
+        if (!asset.params.returnValue || asset.params.returnValue == asset.oldAddress) {
+            Append(report, "没有加载出新对象: %s（返回 %#zx）", asset.label.c_str(), asset.params.returnValue);
+        }
+    }
+    for (const ReloadWork::Slot& slot : work.slots) {
+        Append(report, "%s %-12s %s", Label(slot.kind), slot.outcome, slot.label.c_str());
     }
 }

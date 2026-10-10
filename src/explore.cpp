@@ -15,7 +15,9 @@
 namespace {
 
 constexpr size_t kMaxOutput = 4 << 20;
-constexpr size_t kSuperStructOffset = 0x40;  // UStruct::SuperStruct
+constexpr size_t kSuperStructOffset = 0x40;      // UStruct::SuperStruct
+constexpr size_t kChildPropertiesOffset = 0x50;  // UStruct::ChildProperties
+constexpr size_t kFunctionFlagsOffset = 0xB0;    // UFunction::FunctionFlags
 
 void Append(std::string& out, const char* format, ...) {
     if (out.size() > kMaxOutput) {
@@ -279,6 +281,77 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
         }
     } else if (command == "refs") {
         ReportReferences(system, number, out);
+    } else if (command == "functions") {
+        ObjectView view(system);
+        for (size_t i = 0; i < view.All().size(); ++i) {
+            int32_t index = static_cast<int32_t>(i);
+            if (view.ClassName(index) != "Function" || view.Name(view.IndexOf(view[index].outer)) != first) {
+                continue;
+            }
+            // UFunction: FunctionFlags, NumParms, ParmsSize, ReturnValueOffset in a row, native pointer last.
+            struct {
+                uint32_t flags;
+                uint8_t numParams;
+                uint8_t pad;
+                uint16_t paramsSize;
+                uint16_t returnOffset;
+            } header{};
+            uintptr_t native = 0;
+            SafeRead(view[index].address + kFunctionFlagsOffset, &header, sizeof header);
+            SafeRead(view[index].address + view[index].size - sizeof native, &native, sizeof native);
+            Append(out, "%#zx  %s  参数 %u 个 共 %#x 字节，返回值偏移 %#x，标志 %#x，原生 %s", view[index].address,
+                   view.Name(index).c_str(), header.numParams, header.paramsSize, header.returnOffset, header.flags,
+                   annotator.Code(native).c_str());
+        }
+    } else if (command == "props") {
+        ObjectView view(system);
+        std::string wanted = Lower(second);
+        // Prefer a class of that name over other objects that share it.
+        int32_t found = -1;
+        for (size_t i = 0; i < view.All().size(); ++i) {
+            int32_t index = static_cast<int32_t>(i);
+            if (view.Name(index) == first && (found < 0 || view.ClassName(index) == "Class")) {
+                found = index;
+            }
+        }
+        for (uintptr_t owner = found < 0 ? 0 : view[found].address, depth = 0; owner && depth < 32; ++depth) {
+            Append(out, "== %s", view.Path(view.IndexOf(owner)).c_str());
+            uintptr_t property = 0;
+            SafeRead(owner + kChildPropertiesOffset, &property, sizeof property);
+            for (int guard = 0; property && guard < 4000; ++guard) {
+                // FField: class at 0x08, next at 0x18, name at 0x20. FProperty: array size 0x30, element size 0x34,
+                // flags 0x38, offset 0x44.
+                uint8_t raw[0x48];
+                if (!SafeRead(property, raw, sizeof raw)) {
+                    break;
+                }
+                uintptr_t fieldClass;
+                uintptr_t next;
+                uint32_t name[2];
+                int32_t arraySize;
+                int32_t elementSize;
+                uint64_t flags;
+                int32_t offset;
+                memcpy(&fieldClass, raw + 0x08, sizeof fieldClass);
+                memcpy(&next, raw + 0x18, sizeof next);
+                memcpy(name, raw + 0x20, sizeof name);
+                memcpy(&arraySize, raw + 0x30, sizeof arraySize);
+                memcpy(&elementSize, raw + 0x34, sizeof elementSize);
+                memcpy(&flags, raw + 0x38, sizeof flags);
+                memcpy(&offset, raw + 0x44, sizeof offset);
+                uint32_t typeName[2] = {};
+                SafeRead(fieldClass, typeName, sizeof typeName);  // FFieldClass starts with its name
+                std::string text = system.Name(name[0], name[1]);
+                if (Lower(text).find(wanted) != std::string::npos) {
+                    Append(out, "+%#06x  %-22s %s  大小 %#x%s  标志 %#llx", offset, system.Name(typeName[0], typeName[1]).c_str(),
+                           text.c_str(), elementSize, arraySize > 1 ? " (数组)" : "", flags);
+                }
+                property = next;
+            }
+            if (!SafeRead(owner + kSuperStructOffset, &owner, sizeof owner)) {
+                break;
+            }
+        }
     } else {
         return false;
     }
