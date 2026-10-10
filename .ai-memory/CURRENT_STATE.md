@@ -6,7 +6,9 @@
 - **游戏里运行的是外壳 v0.4.0 + 核心 0.6.2**，目录 `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`：
   - 外壳 `HTReload.asi`，SHA256 `0F2CB234A023A26F3F73FF09B56D3029C96682535E0D1DB6141916A467EA9720`，16:15 前后游戏关闭时部署，之后没变。
   - 核心 `HTReload.core.dll`，SHA256 `9F4C74F6EFF38B089FD6BA350178DF74827F92CDFED03ED82DBC2AAC852017C1`，17:44 在游戏运行中部署，外壳自动换上（这次运行的第 4 次更换）。
-- git：`origin` = `https://github.com/loyal37/HT-Reload`（私有）。最新代码提交 `fcdc7cc`（核心 0.6.2），已推送。本轮的三个提交：`5590bf6`（0.6.0 完整重载）、`cf3dd15`（0.6.1 名字防护）、`fcdc7cc`（0.6.2 挂载后自动重载）。
+- git：`origin` = `https://github.com/loyal37/HT-Reload`。**仓库现在是公开的**（2026-10-10 发 release 时用 `gh` 查到；之前记录是私有，可见性是用户自己改的，我没有动过）。推送的内容包括 `.ai-memory` 任何人都能看到。
+- **Release `v0.6.2`** 已发布（用户要求），指向 `f22f629`，附件 `HTReload-0.6.2.zip`（外壳、核心、README），二进制与游戏里验证过的那两份哈希相同。说明文字的源稿在 `build\release\notes.md`（不入库）。
+- 最新代码提交 `fcdc7cc`（核心 0.6.2），已推送。本轮的三个提交：`5590bf6`（0.6.0 完整重载）、`cf3dd15`（0.6.1 名字防护）、`fcdc7cc`（0.6.2 挂载后自动重载）。
 - **用户规定：每次改完都要提交，不能攒着。** 见 PROJECT_OVERVIEW 的长期约束。
 
 ## 这次运行（17:19 启动，PID 37696）里做过的写操作，全部成功

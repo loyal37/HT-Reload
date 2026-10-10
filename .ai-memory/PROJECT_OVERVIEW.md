@@ -25,7 +25,7 @@
 
 ## 运行环境
 
-- 开发目录：`E:\HT Reload`，远程仓库 `loyal37/HT-Reload`（私有，用户自己创建）
+- 开发目录：`E:\HT Reload`，远程仓库 `loyal37/HT-Reload`（用户自己创建，起初私有，2026-10-10 起是公开的）
 - 游戏目录：`D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`
 - 游戏引擎：改过的 UE 5.6；本机原版源码在 `D:\ue\UE_5.6`，用于核对引擎行为
 - ASI 加载器：游戏 Win64 里的 `dsound.dll` = Ultimate ASI Loader x64 9.7.1，加载 Win64 和 `Win64\plugins` 里的 `.asi`
