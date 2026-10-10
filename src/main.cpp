@@ -31,7 +31,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.6.0";
+const char kVersion[] = "0.6.1";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.

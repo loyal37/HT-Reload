@@ -35,6 +35,7 @@ enum class SlotKind {
     DynamicMaterial,    // store the new parent, then have the material re-send its state to the renderer
     Rewrite,            // plain data: store the new pointer
     Leave,              // an object that is expected to die with the old assets
+    Doubtful,           // the stored value may be a name that happens to equal the address: never written
 };
 
 const char* Label(SlotKind kind) {
@@ -42,8 +43,53 @@ const char* Label(SlotKind kind) {
         case SlotKind::LiveMeshComponent: return "[重设网格]";
         case SlotKind::DynamicMaterial:   return "[换父材质]";
         case SlotKind::Rewrite:           return "[改写]    ";
+        case SlotKind::Doubtful:          return "[存疑]    ";
         default:                          return "[不动]    ";
     }
+}
+
+// Whether the address of an object could just as well be a stored name: a name is kept as the id of
+// its pool entry in the low half and a number in the high half, and the ids reach into the range of
+// low heap addresses.
+bool ReadsAsName(const ObjectSystem& system, uintptr_t address) {
+    return system.IsNameId(static_cast<uint32_t>(address));
+}
+
+// Whether the class at `klass`, or one it derives from, declares an object reference at `offset`.
+// UStruct: SuperStruct at 0x40, ChildProperties at 0x50. FField: class at 0x08 (which starts with its
+// name), next at 0x18. FProperty: array size at 0x30, element size at 0x34, offset at 0x44.
+bool DeclaresObjectAt(const ObjectSystem& system, uintptr_t klass, size_t offset) {
+    for (int depth = 0; klass && depth < 64; ++depth) {
+        uintptr_t property = 0;
+        SafeRead(klass + 0x50, &property, sizeof property);
+        for (int guard = 0; property && guard < 4000; ++guard) {
+            uint8_t raw[0x48];
+            if (!SafeRead(property, raw, sizeof raw)) {
+                break;
+            }
+            uintptr_t fieldClass;
+            int32_t arraySize;
+            int32_t elementSize;
+            int32_t start;
+            memcpy(&fieldClass, raw + 0x08, sizeof fieldClass);
+            memcpy(&arraySize, raw + 0x30, sizeof arraySize);
+            memcpy(&elementSize, raw + 0x34, sizeof elementSize);
+            memcpy(&start, raw + 0x44, sizeof start);
+            if (start >= 0 && arraySize >= 1 && elementSize == sizeof(uintptr_t) && offset >= static_cast<size_t>(start) &&
+                offset < static_cast<size_t>(start) + sizeof(uintptr_t) * static_cast<size_t>(arraySize) &&
+                (offset - static_cast<size_t>(start)) % sizeof(uintptr_t) == 0) {
+                uint32_t typeName[2] = {};
+                SafeRead(fieldClass, typeName, sizeof typeName);
+                std::string type = system.Name(typeName[0], typeName[1]);
+                return type == "ObjectProperty" || type == "ClassProperty" || type == "ObjectPtrProperty" || type == "ClassPtrProperty";
+            }
+            memcpy(&property, raw + 0x18, sizeof property);
+        }
+        if (!SafeRead(klass + 0x40, &klass, sizeof klass)) {
+            break;
+        }
+    }
+    return false;
 }
 
 // Offset of the reflected property `propertyName` that the class `className` declares, or -1.
@@ -74,12 +120,18 @@ int32_t PropertyOffset(const ObjectSystem& system, const ObjectView& view, const
     return -1;
 }
 
-SlotKind Classify(const ObjectView& view, const Superseded& set, const ReferenceSlot& slot, int32_t materialParentOffset) {
+SlotKind Classify(const ObjectSystem& system, const ObjectView& view, const Superseded& set, const ReferenceSlot& slot,
+                  int32_t materialParentOffset) {
     const ObjectInfo& owner = view[slot.owner];
     // An instance of a superseded class cannot be turned into an instance of the new one. The anim
     // instances among them are recreated when the mesh is re-set.
     if (std::binary_search(set.objects.begin(), set.objects.end(), view.IndexOf(owner.klass))) {
         return SlotKind::Leave;
+    }
+    // Slots are found by their value alone. Where that value also reads as a name, only a declared
+    // object reference is taken for a pointer: storing an address over a name would corrupt the owner.
+    if (ReadsAsName(system, view[slot.target].address) && !DeclaresObjectAt(system, owner.klass, slot.location - owner.address)) {
+        return SlotKind::Doubtful;
     }
     // The game keeps its dynamic materials in containers of its own, so they have to stay the same
     // objects and take the new material as their parent.
@@ -199,10 +251,13 @@ ReloadWork PrepareWork(const ObjectSystem& system, const ObjectView& view, const
         }
         char offset[32];
         snprintf(offset, sizeof offset, " +%#zx", slot.location - view[slot.owner].address);
-        work.slots.push_back({Classify(view, set, slot, parentOffset), slot.location, view[slot.owner].address,
+        work.slots.push_back({Classify(system, view, set, slot, parentOffset), slot.location, view[slot.owner].address,
                               view[slot.target].address, asset,
                               view.ClassName(slot.owner) + " " + view.Path(slot.owner) + offset + " -> " + view.ClassName(slot.target) +
                                   " " + view.Name(slot.target)});
+        if (work.slots.back().kind == SlotKind::Doubtful) {
+            work.slots.back().outcome = "可能是名字";
+        }
     }
     return work;
 }
@@ -317,6 +372,11 @@ void Reloader::Plan(const std::vector<uint64_t>& packageIds, std::string& report
     ReloadWork work = PrepareWork(objects_, view, set);
     Append(report, "新包里的包 %zu 个，其中已加载 %zu 个，旧对象共 %zu 个，其他对象里指向它们的槽位 %zu 处", packageIds.size(),
            set.packages.size(), set.objects.size(), set.slots.size());
+    size_t nameLike = 0;
+    for (int32_t object : set.objects) {
+        nameLike += ReadsAsName(objects_, view[object].address);
+    }
+    Append(report, "其中 %zu 个旧对象的地址同时也是一个名字的编号，指向它们的槽位只认类里声明过的对象引用", nameLike);
 
     Append(report, "---- 第一步: 给这些旧包改名 ----");
     for (const ReloadWork::Package& package : work.packages) {

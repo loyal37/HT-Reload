@@ -34,6 +34,9 @@ public:
     // Every live object, sorted by address.
     ArenaVector<ObjectInfo> Snapshot() const;
     std::string Name(uint32_t id, uint32_t number) const;
+    // Whether a name starts at `id` in the pool. Name ids reach into the range of low heap addresses,
+    // so a stored value for which this holds may be a name rather than a pointer.
+    bool IsNameId(uint32_t id) const;
 
     // The chunks of the object table, which hold a pointer to every object.
     ArenaVector<Region> TableRanges() const;

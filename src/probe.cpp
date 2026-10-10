@@ -235,7 +235,13 @@ Superseded FindSuperseded(const ObjectView& view, const std::vector<uint64_t>& p
         Scan(EngineMemory(objects), targets, hits);
         for (const PointerHit& hit : hits) {
             int32_t owner = view.Containing(hit.location);
-            if (owner >= 0 && !isTarget[owner]) {
+            if (owner < 0 || isTarget[owner]) {
+                continue;
+            }
+            // Of an object's header only the class (at 0x10) is a reference to an object elsewhere. The
+            // flags, index and name before 0x28 are plain numbers that can happen to equal an address.
+            size_t offset = hit.location - objects[owner].address;
+            if (offset == 0x10 || offset >= 0x28) {
                 result.slots.push_back({hit.location, owner, result.objects[hit.target]});
             }
         }

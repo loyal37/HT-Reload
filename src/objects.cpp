@@ -399,6 +399,35 @@ std::string ObjectSystem::Name(uint32_t id, uint32_t number) const {
     return name;
 }
 
+bool ObjectSystem::IsNameId(uint32_t id) const {
+    constexpr size_t kBlockBytes = kNameStride << kNameBlockOffsetBits;
+    uint32_t cursor[2] = {};  // CurrentBlock, CurrentByteCursor
+    uint32_t index = id >> kNameBlockOffsetBits;
+    size_t wanted = (id & ((1u << kNameBlockOffsetBits) - 1)) * kNameStride;
+    uintptr_t address = 0;
+    if (!nameBlocks_ || !SafeRead(nameBlocks_ - sizeof cursor, cursor, sizeof cursor) || cursor[0] >= kNameMaxBlocks ||
+        index > cursor[0] || !SafeRead(nameBlocks_ + index * sizeof(uintptr_t), &address, sizeof address) || !address) {
+        return false;
+    }
+    size_t used = index == cursor[0] ? std::min<size_t>(cursor[1], kBlockBytes) : kBlockBytes;
+    std::vector<uint8_t> block(wanted + 2);
+    if (wanted + 2 > used || !SafeRead(address, block.data(), block.size())) {
+        return false;
+    }
+    // Entries vary in size, so where one starts can only be told by walking the block from its beginning.
+    size_t offset = 0;
+    for (;;) {
+        uint16_t header;
+        memcpy(&header, &block[offset], sizeof header);
+        size_t length = header >> 6;
+        if (length == 0 || offset >= wanted) {
+            return length != 0 && offset == wanted;
+        }
+        size_t bytes = (header & 1) ? length * 2 : length;
+        offset += (2 + bytes + kNameStride - 1) & ~(kNameStride - 1);
+    }
+}
+
 std::vector<std::pair<uint32_t, std::string>> ObjectSystem::FindNames(const std::string& text, size_t limit) const {
     constexpr size_t kBlockBytes = kNameStride << kNameBlockOffsetBits;
     std::vector<std::pair<uint32_t, std::string>> found;
