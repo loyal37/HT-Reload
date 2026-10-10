@@ -13,6 +13,12 @@
 // The engine's own ReloadPackages was stripped from the game, but its loader still lets a package
 // be loaded again once the loaded one has been renamed. So: rename the old packages, load them
 // afresh, point everything that used the old assets at the new ones, and let the old ones be collected.
+enum class ReloadResult {
+    Nothing,  // none of the packages is loaded, so there was nothing to replace
+    Done,
+    Failed,   // not attempted, or stopped part-way; the report says where
+};
+
 class Reloader {
 public:
     Reloader(const Image& image, const ObjectSystem& objects) : image_(image), objects_(objects) {}
@@ -28,7 +34,7 @@ public:
 
     // Changes engine state: the whole reload. Renames the loaded packages, loads them again, makes
     // everything that used the old assets use the new ones. The old ones go with the next collection.
-    void Reload(const std::vector<uint64_t>& packageIds, std::string& report);
+    ReloadResult Reload(const std::vector<uint64_t>& packageIds, std::string& report);
 
     // Changes engine state: renames the loaded package that holds the asset `assetName` and loads the
     // asset again. Nothing is repointed, so the game keeps using the old copy; this only proves that

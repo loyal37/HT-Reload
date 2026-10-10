@@ -31,7 +31,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.6.1";
+const char kVersion[] = "0.6.2";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -274,17 +274,55 @@ private:
             Log("严重: 挂载调用抛出异常 %#lx，已停止后续挂载，建议重启游戏", job->exceptionCode);
             Beep(300, 600);
         } else if (job->pakFile) {
-            Log("挂载成功 (IPakFile %p)。返回登录界面再进入后生效", job->pakFile);
-            if (collectGarbage_ && !collectFailed_->load()) {
-                collectUntil_ = GetTickCount64() + kCollectWindowMs;
-                nextCollect_ = 0;
-                Log("接下来 %llu 秒内每 %llu 秒请求一次垃圾回收", kCollectWindowMs / 1000, kCollectIntervalMs / 1000);
-            }
+            Log("挂载成功 (IPakFile %p)", job->pakFile);
             Beep(1200, 120);
             Beep(1600, 160);
+            ReloadMounted(pak);
         } else {
             Log("失败: 引擎拒绝挂载这个包（返回空）");
             Beep(400, 400);
+        }
+    }
+
+    // Replaces what the game has loaded from the packages of a container that was just mounted, so
+    // that the new version shows without a trip to the login screen.
+    void ReloadMounted(const fs::path& pak) {
+        fs::path utoc = pak;
+        utoc.replace_extension(L".utoc");
+        std::vector<uint64_t> ids = ReadContainerPackageIds(utoc.wstring());
+        ReloadResult result = ReloadResult::Failed;
+        std::string report;
+        if (ids.empty()) {
+            report = "读不出这个容器里有哪些包\r\n";
+        } else if (!EnsureObjects()) {
+            report = "对象系统不可用\r\n";
+        } else {
+            result = reloader_.Reload(ids, report);
+        }
+        WriteWholeFile(paths_.moduleDir / L"HTReload.reload.txt", report);
+        // The report lists every slot; the log gets the lines above that list.
+        std::istringstream lines(report);
+        for (std::string line; std::getline(lines, line);) {
+            while (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (!line.empty() && line[0] != '[') {
+                Log("重载: %s", line.c_str());
+            }
+        }
+        ULONGLONG window = kCollectWindowMs;
+        if (result == ReloadResult::Done) {
+            Log("重载完成，新版本已经生效");
+            Beep(2000, 200);
+            window = 20000;  // the old assets are unreferenced now and go with the next collection
+        } else if (result == ReloadResult::Failed) {
+            Log("重载没有完成，明细在 HTReload.reload.txt。返回登录界面再进入可以让新版本生效");
+            Beep(400, 400);
+        }
+        if (collectGarbage_ && !collectFailed_->load()) {
+            collectUntil_ = GetTickCount64() + window;
+            nextCollect_ = 0;
+            Log("接下来 %llu 秒内每 %llu 秒请求一次垃圾回收", window / 1000, kCollectIntervalMs / 1000);
         }
     }
 

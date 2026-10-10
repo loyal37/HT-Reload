@@ -392,13 +392,17 @@ void Reloader::Plan(const std::vector<uint64_t>& packageIds, std::string& report
     }
 }
 
-void Reloader::Reload(const std::vector<uint64_t>& packageIds, std::string& report) {
+ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::string& report) {
     if (!calls_.Ready() && !Resolve(report)) {
-        return;
+        return ReloadResult::Failed;
     }
     ObjectView view(objects_);
     Superseded set = FindSuperseded(view, packageIds, true);
     ReloadWork work = PrepareWork(objects_, view, set);
+    if (work.packages.empty()) {
+        Append(report, "这些包当前都没有被加载，不需要重载");
+        return ReloadResult::Nothing;
+    }
 
     uintptr_t library = 0;
     for (size_t i = 0; i < view.All().size(); ++i) {
@@ -409,11 +413,11 @@ void Reloader::Reload(const std::vector<uint64_t>& packageIds, std::string& repo
     uintptr_t loadAsset = FindFunction(objects_, view.All(), "KismetSystemLibrary", "LoadAsset_Blocking");
     uintptr_t setMesh = FindFunction(objects_, view.All(), "SkeletalMeshComponent", "SetSkeletalMeshAsset");
     uintptr_t copyOverrides = FindFunction(objects_, view.All(), "MaterialInstanceDynamic", "CopyParameterOverrides");
-    if (work.packages.empty() || work.assets.empty() || !library || calls_.ParamsSize(loadAsset) != sizeof(LoadAssetParams) ||
+    if (work.assets.empty() || !library || calls_.ParamsSize(loadAsset) != sizeof(LoadAssetParams) ||
         calls_.ParamsSize(setMesh) != sizeof(uintptr_t) || calls_.ParamsSize(copyOverrides) != sizeof(uintptr_t)) {
         Append(report, "条件不满足: 旧包 %zu 个，资产 %zu 个，库对象 %#zx，加载 %#zx，设网格 %#zx，材质同步 %#zx", work.packages.size(),
                work.assets.size(), library, loadAsset, setMesh, copyOverrides);
-        return;
+        return ReloadResult::Failed;
     }
 
     // One task on the game thread, so that no garbage collection can run between loading the new
@@ -461,7 +465,7 @@ void Reloader::Reload(const std::vector<uint64_t>& packageIds, std::string& repo
                     }
                 }
             }
-            // A component has two slots for its mesh; re-setting it once covers both.
+            // A component has several slots for its mesh; re-setting it once covers them all.
             uintptr_t lastComponent = 0;
             for (ReloadWork::Slot& slot : work.slots) {
                 uintptr_t loaded = replacement(slot);
@@ -477,12 +481,20 @@ void Reloader::Reload(const std::vector<uint64_t>& packageIds, std::string& repo
                     lastComponent = slot.owner;
                 }
             }
+            // The game's component keeps the mesh in fields of its own as well. Should re-setting have
+            // left one of them alone, it would be the only thing still pointing at the old mesh.
+            for (ReloadWork::Slot& slot : work.slots) {
+                uintptr_t loaded = replacement(slot);
+                if (!stopped && slot.kind == SlotKind::LiveMeshComponent && loaded && ReplacePointer(slot.location, slot.oldTarget, loaded)) {
+                    slot.outcome = "重设后仍是旧值，已改写";
+                }
+            }
         },
         120000);
 
     if (!ran) {
         Append(report, "游戏线程没有执行");
-        return;
+        return ReloadResult::Failed;
     }
     size_t renamed = 0;
     size_t loaded = 0;
@@ -504,4 +516,5 @@ void Reloader::Reload(const std::vector<uint64_t>& packageIds, std::string& repo
     for (const ReloadWork::Slot& slot : work.slots) {
         Append(report, "%s %-12s %s", Label(slot.kind), slot.outcome, slot.label.c_str());
     }
+    return stopped ? ReloadResult::Failed : ReloadResult::Done;
 }
