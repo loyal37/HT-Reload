@@ -28,8 +28,17 @@ function Sources([string]$folder) {
 
 Invoke-Cl (Join-Path $out 'obj\core') "/LD $(Sources 'src') /Fe`"$out\HTReload.core.dll`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
 Write-Host "Built $out\HTReload.core.dll"
-Invoke-Cl (Join-Path $out 'obj\shell') "/LD $(Sources 'shell') /Fe`"$out\HTReload.asi`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
-Write-Host "Built $out\HTReload.asi"
+# The shell is only rebuilt when its sources changed: every build produces different bytes, and a
+# shell that differs from the deployed one cannot be replaced while the game is running.
+$shellOutput = Join-Path $out 'HTReload.asi'
+$shellInputs = @(Get-ChildItem (Join-Path $root 'shell') -Filter *.cpp) + (Get-Item (Join-Path $root 'src\host.h'))
+$newestInput = ($shellInputs | Sort-Object LastWriteTime | Select-Object -Last 1).LastWriteTime
+if ((Test-Path $shellOutput) -and (Get-Item $shellOutput).LastWriteTime -gt $newestInput) {
+    Write-Host "Up to date $shellOutput"
+} else {
+    Invoke-Cl (Join-Path $out 'obj\shell') "/LD $(Sources 'shell') /Fe`"$shellOutput`" /link /NOLOGO /INCREMENTAL:NO user32.lib"
+    Write-Host "Built $shellOutput"
+}
 
 if ($Test) {
     $hostDir = Join-Path $out 'test\HT\Binaries\Win64'

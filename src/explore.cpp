@@ -242,6 +242,18 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
             for (uintptr_t ref : FindLeaRefs(image.exec, start, &faulted)) {
                 Append(out, "    被引用于 %s", annotator.Code(ref - 3).c_str());
             }
+            // UE_LOG keeps its format string in a static record and the code takes the record's address.
+            for (const std::vector<Region>* regions : {&image.readOnly, &image.writable}) {
+                for (uintptr_t slot : FindBytes(*regions, &start, sizeof start)) {
+                    if (slot % sizeof(uintptr_t)) {
+                        continue;
+                    }
+                    Append(out, "    指针位于 RVA %#zx", slot - image.base);
+                    for (uintptr_t ref : FindLeaRefs(image.exec, slot, &faulted)) {
+                        Append(out, "        该处被引用于 %s", annotator.Code(ref - 3).c_str());
+                    }
+                }
+            }
         }
     } else if (command == "astrref") {
         std::string pattern = std::string(1, '\0') + arguments + std::string(1, '\0');

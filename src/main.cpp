@@ -30,9 +30,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.4.0";
+const char kVersion[] = "0.4.1";
 
 const CoreHost* g_host = nullptr;
+// Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
+uint32_t g_generation = 0;
 HANDLE g_stop = nullptr;
 HANDLE g_worker = nullptr;
 
@@ -427,7 +429,7 @@ void Run() {
     }
 
     // At game start the plugin loads before the game's own entry point runs; give the unpacker a moment.
-    if (g_host->generation == 0 && WaitStop(3000)) {
+    if (g_generation == 0 && WaitStop(3000)) {
         return;
     }
 
@@ -481,6 +483,7 @@ extern "C" __declspec(dllexport) bool CoreStart(const CoreHost* host) {
         return false;
     }
     g_host = host;
+    g_generation = host->generation;
     LogAttach(host);
     GameThread_Attach(host);
     g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
