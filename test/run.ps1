@@ -3,7 +3,8 @@
 #     on the host's main thread, followed by a collection request;
 #   - a probe requested through the command file finds what refers to the superseded package;
 #   - once a second version of the container is mounted, the first one is unmounted on request and
-#     its files are let go, while the second stays mounted;
+#     its files are deleted, while the second stays mounted; a container published later with a
+#     lower number is not touched;
 #   - replacing the core while the host runs brings up a new core that still answers commands and
 #     does not mount the container a second time.
 # Keep this file ASCII: Windows PowerShell 5.1 reads BOM-less scripts in the system code page.
@@ -106,8 +107,16 @@ Wait-Log 'the second version to be mounted' { param($text) (Count $text 'IPakFil
 $heldBefore = -not (Test-Deletable (Join-Path $hot 'hot_1_P.ucas'))
 Send-Command 'unmount'
 $unmount = Read-Shared $answers
-$oldFree = Test-Deletable (Join-Path $hot 'hot_1_P.ucas')
+$oldLeft = @(Get-ChildItem $hot -Filter 'hot_1_P.*').Count
 $newHeld = -not (Test-Deletable (Join-Path $hot 'hot_2_P.ucas'))
+
+# A container published afterwards with a lower number does not take over, and is not an old version either.
+Publish 'hot_0_P'
+Wait-Log 'the low-numbered container to be mounted' { param($text) (Count $text 'IPakFile') -ge 3 }
+Send-Command 'unmount'
+$lowNumber = Read-Shared $answers
+$lowLeft = @(Get-ChildItem $hot -Filter 'hot_0_P.*').Count
+$currentLeft = @(Get-ChildItem $hot -Filter 'hot_2_P.*').Count
 
 # Replace the core while the host keeps running.
 Start-Sleep -Seconds 2
@@ -129,20 +138,25 @@ Write-Host $probe
 Write-Host '--- HTReload.out.txt ---'
 Write-Host $tooEarly
 Write-Host $unmount
+Write-Host $lowNumber
 Write-Host $objects
 Write-Host "--- host exit code: $($process.ExitCode) ---"
 if ($process.ExitCode -ne 0) { throw 'Test failed' }
 
 # With one version mounted nothing is redundant. With two, exactly the older one is unmounted, on
-# the host's main thread, and only its files are let go.
+# the host's main thread, and its three files are deleted. A container that arrives later with a
+# lower number is left alone, and so is the current version.
 $hostOutput = Get-Content $stdout -Raw
 if ($tooEarly.Contains('hot_')) { throw 'An unmount was attempted while only one version was mounted.' }
 if (-not $heldBefore) { throw 'The host did not hold the mounted container open.' }
 if ((Count $hostOutput 'host: unmount call') -ne 1 -or -not $hostOutput.Contains('found=1 -> OK')) { throw 'The host did not see exactly one correct unmount call.' }
 if (-not $unmount.Contains('hot_1_P')) { throw 'The unmount answer does not name the old version.' }
 if ($unmount.Contains('hot_2_P')) { throw 'The unmount answer names the current version.' }
-if (-not $oldFree) { throw 'The old version is still held open after the unmount.' }
+if ($oldLeft -ne 0) { throw "Files of the old version are left after the unmount: $oldLeft" }
 if (-not $newHeld) { throw 'The current version is no longer held open.' }
+if ($lowNumber.Contains('hot_')) { throw 'The container with the lower number was taken for an old version.' }
+if ($lowLeft -ne 3) { throw "Files of the container with the lower number are missing: $lowLeft of 3 left" }
+if ($currentLeft -ne 3) { throw "Files of the current version are missing: $currentLeft of 3 left" }
 
 # The probe must find the loaded texture, its root flag, the object that points at it directly and
 # the object that holds it through a heap block, and must not blame unrelated objects.

@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.7.0";
+const char kVersion[] = "0.7.1";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -238,8 +238,8 @@ public:
         : paths_(std::move(paths)), api_(api), collectGarbage_(collectGarbage), objects_(objects), image_(image) {
         for (const fs::path& pak : ListPaks(paths_.paksDir)) {
             handled_.insert(Key(pak));
+            mounted_[Key(pak)] = 0;
         }
-        mounted_ = handled_;
         Log("磁盘上已有 %zu 个 pak，视为已挂载", handled_.size());
     }
 
@@ -320,7 +320,7 @@ private:
             Beep(300, 600);
         } else if (job->pakFile) {
             Log("挂载成功 (IPakFile %p)", job->pakFile);
-            mounted_.insert(Key(pak));
+            mounted_[Key(pak)] = ++mountSequence_;
             Beep(1200, 120);
             Beep(1600, 160);
             ReloadMounted(pak);
@@ -336,6 +336,14 @@ private:
         fs::path utoc = pak;
         utoc.replace_extension(L".utoc");
         std::vector<uint64_t> ids = ReadContainerPackageIds(utoc.wstring());
+        for (const Container& other : MountedModContainers()) {
+            bool shares = std::find_first_of(ids.begin(), ids.end(), other.ids.begin(), other.ids.end()) != ids.end();
+            if (shares && other.rank > PatchRank(pak)) {
+                Log("注意: 已挂载的 %s 编号更大，同名资产游戏仍会用它。新版本请用比它更大的编号",
+                    Utf8(other.pak.stem().wstring()).c_str());
+                break;
+            }
+        }
         ReloadResult result = ReloadResult::Failed;
         std::string report;
         if (ids.empty()) {
@@ -381,34 +389,46 @@ private:
         }
     }
 
-    // Mod containers that a newer version has made redundant: every package they hold is also in
-    // another mounted mod container with a higher patch number, so the engine reads nothing from them
-    // any more. A container counts as mounted while its data file is held open.
-    std::vector<fs::path> ShadowedContainers() {
-        struct Container {
-            fs::path pak;
-            std::vector<uint64_t> ids;
-            int rank;
-        };
+    struct Container {
+        fs::path pak;
+        std::vector<uint64_t> ids;  // sorted
+        int rank;                   // PatchRank
+        int sequence;               // 0 if mounted when the game started, otherwise the order of mounting
+    };
+
+    // The mod containers that are mounted. A container counts as mounted while the plugin has it
+    // down as such and its data file is held open; the second alone would also be true of a file
+    // that the packager is still writing.
+    std::vector<Container> MountedModContainers() {
         std::vector<Container> mounted;
         for (const fs::path& pak : ListPaks(paths_.paksDir)) {
             fs::path utoc = pak;
             fs::path ucas = pak;
             utoc.replace_extension(L".utoc");
             ucas.replace_extension(L".ucas");
-            // A file the packager is still writing is held open too, hence the check against what was mounted.
-            if (pak.parent_path() == paths_.paksDir || !mounted_.count(Key(pak)) || !HeldOpen(ucas)) {
+            auto known = mounted_.find(Key(pak));
+            if (pak.parent_path() == paths_.paksDir || known == mounted_.end() || !HeldOpen(ucas)) {
                 continue;
             }
             std::vector<uint64_t> ids = ReadContainerPackageIds(utoc.wstring());
             if (!ids.empty()) {
-                mounted.push_back({pak, std::move(ids), PatchRank(pak)});
+                mounted.push_back({pak, std::move(ids), PatchRank(pak), known->second});
             }
         }
+        return mounted;
+    }
+
+    // Mod containers that a newer version has made redundant: every package they hold is also in
+    // another mounted mod container that has a higher patch number and was not mounted before them,
+    // so the engine reads nothing from them any more. The second condition keeps a container that was
+    // published with too low a number from being taken for an old version.
+    std::vector<fs::path> ShadowedContainers() {
+        std::vector<Container> mounted = MountedModContainers();
         std::vector<fs::path> shadowed;
         for (const Container& old : mounted) {
             for (const Container& newer : mounted) {
-                if (newer.rank > old.rank && std::includes(newer.ids.begin(), newer.ids.end(), old.ids.begin(), old.ids.end())) {
+                if (newer.rank > old.rank && newer.sequence >= old.sequence &&
+                    std::includes(newer.ids.begin(), newer.ids.end(), old.ids.begin(), old.ids.end())) {
                     shadowed.push_back(old.pak);
                     break;
                 }
@@ -417,8 +437,23 @@ private:
         return shadowed;
     }
 
+    // Deletes the files of a container that the engine has let go of, and says how that went.
+    static std::string DeleteContainer(const fs::path& pak) {
+        // The data file goes first: should it refuse, the container is left complete.
+        for (const wchar_t* extension : {L".ucas", L".utoc", L".pak"}) {
+            fs::path file = pak;
+            file.replace_extension(extension);
+            DWORD error = DeleteFileW(file.c_str()) ? ERROR_SUCCESS : GetLastError();
+            if (error != ERROR_SUCCESS && error != ERROR_FILE_NOT_FOUND) {
+                return "已卸载，但删不掉 " + Utf8(file.filename().wstring()) + "（错误 " + std::to_string(error) + "）";
+            }
+        }
+        return "已卸载并删除";
+    }
+
     // Has the engine unmount the containers that newer versions have made redundant, which makes it
-    // let go of their files. Returns false when that has to wait because old assets are still alive.
+    // let go of their files, and deletes those files. Returns false when that has to wait because old
+    // assets are still alive.
     bool UnmountShadowed(std::string& report) {
         if (!api_.handleUnmountPak && !unmountDisabled_) {
             // The engine binds this handler a moment after the mount handler, so the look at startup can be too early.
@@ -473,10 +508,10 @@ private:
                 report += name + ": 引擎没有卸载它（返回否），路径 " + Utf8(enginePath) + "\r\n";
             } else if (HeldOpen(ucas)) {
                 mounted_.erase(Key(pak));
-                report += name + ": 引擎已卸载，但文件仍被占用\r\n";
+                report += name + ": 引擎已卸载，但文件仍被占用，没有删除\r\n";
             } else {
                 mounted_.erase(Key(pak));
-                report += name + ": 已卸载，这个旧版本的三件套现在可以删除\r\n";
+                report += name + ": " + DeleteContainer(pak) + "\r\n";
             }
         }
         return true;
@@ -508,7 +543,7 @@ private:
     //   renameload <asset>      WRITES: rename the package holding that asset and load the asset again
     //   reload [filter]         WRITES: replace the loaded assets of those containers by fresh copies
     //   shadowed                list the mounted mod containers that a newer version has made redundant
-    //   unmount                 WRITES: have the engine unmount those containers, which frees their files
+    //   unmount                 WRITES: have the engine unmount those containers and DELETE their files
     void RunCommands() {
         fs::path path = paths_.moduleDir / L"HTReload.cmd.txt";
         std::error_code error;
@@ -652,7 +687,8 @@ private:
     Reloader reloader_{*image_, *objects_};
     std::wstring reportPath_ = (paths_.moduleDir / L"HTReload.probe.txt").wstring();
     std::set<std::wstring> handled_;
-    std::set<std::wstring> mounted_;  // paks the engine has mounted, as far as the plugin knows
+    std::map<std::wstring, int> mounted_;  // paks the engine has mounted, as far as the plugin knows, with Container::sequence
+    int mountSequence_ = 0;
     std::map<std::wstring, Pending> pending_;
     bool disabled_ = false;
     bool unmountDisabled_ = false;

@@ -267,9 +267,11 @@ struct PlatformFile {
     virtual const wchar_t* Name() { return L"Base"; }
 };
 
-// The two versions of one container that the test publishes, in order.
+// The versions of one container that the test publishes, in order. The last has too low a number
+// to take over from the one before it.
 const wchar_t* const kHotPaks[] = {L"../../../HT/Content/Paks/MOD/hot/hot_1_P.pak",
-                                   L"../../../HT/Content/Paks/MOD/hot/hot_2_P.pak"};
+                                   L"../../../HT/Content/Paks/MOD/hot/hot_2_P.pak",
+                                   L"../../../HT/Content/Paks/MOD/hot/hot_0_P.pak"};
 
 // Like the engine, the host keeps the data files of a mounted container open in a way that lets
 // others read them but not delete them.
@@ -277,7 +279,7 @@ struct MountedPak {
     const wchar_t* path;
     HANDLE files[2];
 };
-MountedPak g_mountedPaks[2];
+MountedPak g_mountedPaks[std::size(kHotPaks)];
 int g_mountCount = 0;
 int g_unmountCalls = 0;
 
@@ -293,7 +295,7 @@ struct PakPlatformFile : PlatformFile {
 
     __declspec(noinline) void* HandleMountPak(const EngineString& path, int order) {
         DebugPrint(L"Mounting pak file: %s \n", path.data);
-        const wchar_t* expected = g_mountCount < 2 ? kHotPaks[g_mountCount] : L"";
+        const wchar_t* expected = g_mountCount < static_cast<int>(std::size(kHotPaks)) ? kHotPaks[g_mountCount] : L"";
         bool ok = wcscmp(path.data, expected) == 0 && order == -1 && path.num == static_cast<int>(wcslen(expected)) + 1 &&
                   GetCurrentThreadId() == g_mainThread;
         if (ok) {
