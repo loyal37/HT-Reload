@@ -1,213 +1,217 @@
 # Session Log
 
-## 2026-10-10 - 立项并完成 v0.1.0
+## 2026-10-10 - Project started, v0.1.0 finished
 
-- 起因：用户问现有流程做的 pak Mod 怎样热重载。会话在 `D:\ueproject\HT` 开始，随后用户指定在 `E:\HT Reload` 开发并部署到游戏目录。
-- 调查结论：
-  - Mod 只在引擎启动扫描 `Content\Paks` 时挂载；Shipping 版没有 `Mount` / `Unmount` 命令。
-  - 用户纠正：实际加载方式是游戏 Win64 里的 `dsound.dll`（Ultimate ASI Loader）加 `plugins\UniversalSigBypasser.asi`，不是 `Game start.exe` 注入器（其日志停在 2026-05-31）。
-  - 用户决定：暂不用桥接，仍用打包器；打包器当前直接输出到游戏的 `Paks\MOD\<Mod 名>`。
-  - `HTGame.exe` 在磁盘上加壳，代码节 63% 的页为零、其余为密文，无法离线分析代码；只读数据里的字符串是明文。
-  - 在 UE 5.6 源码里核对了挂载、`_P` 版本优先级、容器排序和文件共享方式，行号见 ARCHITECTURE。
-- 实现：`src/` 下五个模块，`test/host.cpp` 替身宿主，`build.ps1`、`deploy.ps1`、`test\run.ps1`，README。
-- 过程中修掉的问题：
-  - 初始化列表里混用 `const` 和非 `const` 指针导致编译错误，改成显式数组。
-  - `.ps1` 里的中文在 PowerShell 5.1 下会损坏，脚本改成纯 ASCII。
-  - 测试脚本读不到日志（插件持有写句柄）和拿不到退出码，改用写共享方式读取并提前取进程句柄。
-  - 首次扫描可能只扫到一个候选函数，改为候选不足 2 个时每次重扫；首次扫描前等 3 秒。
-- 测试：`test\run.ps1` 通过，宿主退出码 0。
-- 部署：`HTReload.asi` 已复制到游戏 Win64，哈希见 CURRENT_STATE。
-- 源码管理：未提交、未推送，用户没有要求。
-- 接下来：用户启动游戏做首轮验证并交回 `HTReload.log`，步骤见 CURRENT_STATE。
+- Origin: the user asked how pak mods made with the current workflow could be hot reloaded. The session began in `D:\ueproject\HT`; the user then chose `E:\HT Reload` for development, with deployment into the game folder.
+- Findings:
+  - Mods are only mounted when the engine scans `Content\Paks` at startup; the shipping build has no `Mount` / `Unmount` commands.
+  - Corrected by the user: mods are actually loaded through `dsound.dll` (Ultimate ASI Loader) in the game's Win64 folder plus `plugins\UniversalSigBypasser.asi`, not through the `Game start.exe` injector (whose log ends on 2026-05-31).
+  - User decision: no bridge for now, packaging stays with the packager, which publishes straight into the game's `Paks\MOD\<mod name>`.
+  - `HTGame.exe` is packed on disk: 63% of the pages of its code section are zero and the rest is ciphertext, so its code cannot be analysed offline; the strings in read-only data are plain.
+  - Mounting, the priority of `_P` versions, container ordering and file sharing were checked in the UE 5.6 source; line numbers are in ARCHITECTURE.
+- Implemented: five modules under `src/`, the stand-in host `test/host.cpp`, `build.ps1`, `deploy.ps1`, `test\run.ps1`, README.
+- Fixed on the way:
+  - A compile error from mixing `const` and non-`const` pointers in an initializer list; an explicit array instead.
+  - Non-ASCII text in `.ps1` files is damaged under PowerShell 5.1; the scripts became pure ASCII.
+  - The test script could not read the log (the plugin holds a write handle) or get the exit code; it now reads with write sharing and takes the process handle early.
+  - A first scan could find only one candidate function; it now rescans every time while fewer than 2 are known, and waits 3 seconds before the first scan.
+- Test: `test\run.ps1` passed, host exit code 0.
+- Deployed: `HTReload.asi` copied into the game's Win64 folder.
+- Source control: not committed or pushed; the user had not asked.
+- Next: the user starts the game for a first check and hands back `HTReload.log`.
 
-## 2026-10-10 - 真游戏首次运行：定位成功
+## 2026-10-10 - First run in the game: located
 
-- 用户启动游戏后让我看日志。插件 13:34:41 启动，13:34:45 完成定位，13:35:01 就绪；游戏进程正常，SigBypasser 和 Anticensor 的日志也照常更新。
-- 结果与原版引擎的预期完全一致：锚点 2 处引用、2 个候选函数、唯一一处委托绑定。具体 RVA 见 CURRENT_STATE。
-- 人工反汇编了日志里的 0x11e 字节，确认就是 `HandleMountPakDelegate`，参数和 `FString` 布局与插件的调用方式相符。
-- 没有改代码，没有重新部署。
-- 接下来：用户换名打包测试挂载，再切换角色测试刷新。
+- The user started the game and asked for a look at the log. The plugin started at 13:34:41, finished locating at 13:34:45 and was ready at 13:35:01; the game process was fine and the logs of SigBypasser and Anticensor kept updating as usual.
+- The result matched the stock engine exactly: 2 references to the anchor, 2 candidate functions, a single delegate binding.
+- The 0x11e bytes in the log were disassembled by hand and confirmed as `HandleMountPakDelegate`, with parameters and `FString` layout matching the way the plugin calls it.
+- No code change, no redeploy.
+- Next: the user packages under a new name to test mounting, then switches characters to test the refresh.
 
-## 2026-10-10 - 真游戏首次挂载成功，v0.1.1
+## 2026-10-10 - First mount in the game, v0.1.1
 
-- 用户重启过游戏（新进程 13:38:49 启动），之后用打包器发布 `blackbird_1_P`。日志：13:40:37 文件落盘，13:40:40 发现并挂载成功，调用耗时 7 毫秒。13:42 进程仍正常响应。
-- 第一次运行为什么结束不清楚，日志已被第二次运行覆盖。因此加了保留上一次日志的功能。
-- 这次定位多报了一处“绑定”，查明是探测窗口读进了相邻堆块，同一个实例被看到两次。已改为按“函数+对象”去重。
-- v0.1.1 构建并通过 `test\run.ps1`。未部署（游戏在运行）。未提交。
-- 接下来：问用户切换角色后的结果和第一次运行的结束原因；游戏关闭后部署 v0.1.1。
+- The user had restarted the game (new process started 13:38:49) and then published `blackbird_1_P` with the packager. Log: files on disk at 13:40:37, found and mounted at 13:40:40, the call took 7 milliseconds. The process was still responsive at 13:42.
+- Why the first run ended is not known; its log had been overwritten by the second run. Keeping the previous log was added because of this.
+- Locating reported one binding too many this time: the probing window had read into the next heap block and seen the same instance twice. Bindings are now deduplicated by function and object.
+- v0.1.1 built and passed `test\run.ps1`. Not deployed (the game was running). Not committed.
+- Next: ask the user what switching characters did and why the first run ended; deploy v0.1.1 when the game is closed.
 
-## 2026-10-10 - 切换角色不刷新，v0.2.0 加主动垃圾回收
+## 2026-10-10 - Switching characters does not refresh; v0.2.0 adds active collection
 
-- 用户把身体贴图改成纯黑，发布 `blackbird_2_P`。日志 13:49:21 挂载成功，但游戏里切换角色后没变化。
-- 排查：三个版本的 ucas 哈希互不相同；打包源里 `042_blackbird_body_d/id/m/n.ubulk` 每个都只有一种 BC 块，确实是纯色。问题定位在游戏没有卸载旧资产。
-- 离线找到垃圾回收入口：`CollectGarbage` 名字在只读数据里被两张生成表引用，原生表里它后面的函数是 RVA `0x4406bd0`。游戏自带的 `ForceGarbageCollection` 是空桩。用 UE 5.6 源码确认了两张表的结构和 `CollectGarbage` 的实现。
-- 实现 v0.2.0：`FindCollectGarbageThunk`，挂载后 120 秒内每 5 秒请求一次。替身宿主加了两张表和对应检查，`test\run.ps1` 通过。
-- 未部署（游戏仍在运行，PID 31840）。未提交。
-- 接下来见 CURRENT_STATE。第一次运行（13:34）为什么结束，用户还没回答。
+- The user turned the body textures plain black and published `blackbird_2_P`. The log shows the mount at 13:49:21, but nothing changed in the game after switching characters.
+- Checked: the ucas hashes of the three versions all differ; in the packaging source, each of `042_blackbird_body_d/id/m/n.ubulk` holds a single kind of BC block, so the textures really are a flat colour. The problem is that the game does not unload the old assets.
+- Found the collection entry offline: the name `CollectGarbage` is referenced from two generated tables in read-only data, and in the native table the function after it is RVA `0x4406bd0`. The game's own `ForceGarbageCollection` is an empty stub. The structure of both tables and the implementation of `CollectGarbage` were confirmed in the UE 5.6 source.
+- v0.2.0: `FindCollectGarbageThunk`, a request every 5 seconds for 120 seconds after a mount. The stand-in host got the two tables and a matching check; `test\run.ps1` passed.
+- Not deployed (the game was still running, PID 31840). Not committed.
 
-## 2026-10-10 - 热重载链路打通
+## 2026-10-10 - Hot reload works end to end
 
-- 用户反馈：换出队伍没用，返回登录界面再进入后贴图变黑。
-- 核对：游戏进程仍是 13:38:49 启动的那个（PID 31840），所以这是同一进程内的刷新，不是重启。
-- 结论：定位、挂载、刷新三步都已在真游戏里成立，刷新目前需要返回登录界面。
-- 没有改代码。v0.2.0 仍未部署（游戏在运行）。未提交。
-- 接下来：部署 v0.2.0 后试更轻的刷新操作；可以开始改打包器。
+- The user reported: leaving the party did nothing; after returning to the login screen and entering again the textures were black.
+- Checked: the game process was still the one started at 13:38:49 (PID 31840), so this was a refresh inside one process, not a restart.
+- Conclusion: locating, mounting and refreshing all hold in the game; refreshing currently takes a return to the login screen.
+- No code change. v0.2.0 still not deployed (game running). Not committed.
 
-## 2026-10-10 - 部署 v0.2.0，首次提交并推送
+## 2026-10-10 - v0.2.0 deployed, first commit and push
 
-- 用户关了游戏，要求部署并把源码发布到 GitHub。
-- 部署：`deploy.ps1` 成功，游戏目录里的文件哈希与构建产物一致（见 CURRENT_STATE）。
-- GitHub：用户已自己建好私有仓库 `loyal37/HT-Reload` 并设成本地 `origin`，所以直接推到那里，没有另建仓库，没有改可见性。
-- 提交 `7210708`（24 个文件，含 `.ai-memory` 和 `.codex`），推送 `main`，`ls-remote` 核对一致。随后补一个只更新记忆文件的提交。
-- 没有打标签，没有发 Release。
-- 接下来：用户启动游戏验证 v0.2.0 的垃圾回收，并试更轻的刷新操作。
+- The user closed the game and asked for deployment and for the source to be published on GitHub.
+- Deployed: `deploy.ps1` succeeded; the file hashes in the game folder match the build output.
+- GitHub: the user had already created the repository `loyal37/HT-Reload` (private at the time) and set it as the local `origin`, so the push went there; no other repository was created and the visibility was not touched.
+- Commit `7210708` (24 files, including `.ai-memory` and `.codex`), pushed to `main`, checked with `ls-remote`. A commit with only memory updates followed.
+- No tag, no release.
 
-## 2026-10-10 - v0.2.0 真游戏首次运行：回收正常，切换角色仍不刷新
+## 2026-10-10 - v0.2.0 in the game: collection works, switching still does not refresh
 
-- 用户 14:10 启动游戏，发布 `blackbird_4_P`（已自行删掉 `blackbird_P` 和 `blackbird_1_P`，启动时仍是 19 个 pak），反馈“切换角色依然不行”。
-- 日志：定位正常；垃圾回收入口 RVA `0x4406bd0` 与离线值一致，入口字节反汇编后与预期逐条相符；14:11:52 挂载成功；回收窗口内没有异常。
-- 结论：主动回收有效但帮不上忙，资产在角色留在队伍或世界里时一直被引用。
-- 想到一条新路：贴图的流送 mip 每次读取都重新选容器，可以靠重新流送实现贴图即时刷新。只是设想，记在 TASKS 的 Pending。
-- 没有改代码。只更新了记忆文件，未提交。
+- The user started the game at 14:10 and published `blackbird_4_P` (having removed `blackbird_P` and `blackbird_1_P` themselves; still 19 paks at startup), and reported that switching characters still did nothing.
+- Log: locating was normal; the collection entry RVA `0x4406bd0` matched the offline value and its bytes disassembled exactly as expected; mounted at 14:11:52; no exception during the collection window.
+- Conclusion: active collection works but does not help; the assets stay referenced while the character is in the party or the world.
+- A new idea: a texture's streamed mips pick their container at every read, so re-streaming could refresh textures instantly. Only an idea, noted under Pending in TASKS.
+- No code change. Memory files updated only, not committed.
 
-## 2026-10-10 - 用户要完全重载，做 v0.3.0 探测版
+## 2026-10-10 - The user wants a complete reload; v0.3.0, a probing build
 
-- 用户答复：几种切换都试过，都不行；目标是 pak 资产完全重载，不能只局限于贴图。
-- 判断：必须先知道谁持有旧资产。写了只读的对象系统读取和引用探测。
-- 过程中查实：
-  - 这个 Mod 的包名带 `Player`（`/Game/Characters/Player/042_Blackbird_1/...`），打包源目录和 `.utoc` 目录索引都不带。一开始按目录算包 ID 全部对不上，查资产内部才发现。
-  - `CityHash64` 的移植与引擎源码逐行一致，用真实 `.utoc` 验证通过。
-  - `.utoc`（retoc 生成，版本 8）：头 144 字节，43 个块里 26 个包数据、16 个批量数据、1 个容器头，带目录索引。
-  - 第二遍找堆块主人时，如果不排除“起点落在别的对象体内”，会把大量无关对象报成持有者；已改成往回走到别的对象就停。
-  - 扫描范围从“整个进程”收窄到“放着引擎对象的分配加主模块数据”，理由见 DECISIONS。
-- 用户期间自己关了游戏，删掉了 `blackbird_4_P`，Mod 目录只剩 `blackbird_2_P`。
-- 测试：`test\run.ps1` 通过，包含探测报告的四项检查。
-- 部署：v0.3.0 已复制到游戏 Win64，哈希见 CURRENT_STATE。未提交。
-- 接下来：用户跑一次探测，步骤见 CURRENT_STATE。
+- The user answered that all kinds of switching had been tried without effect, and that the goal is a complete reload of pak assets, not just textures.
+- Judgement: who holds the old assets has to be known first. A read-only reader of the object system and a reference probe were written.
+- Established on the way:
+  - This mod's package names contain `Player` (`/Game/Characters/Player/042_Blackbird_1/...`), while the packaging source directory and the directory index of the `.utoc` do not. Package ids computed from the directory matched nothing at first; looking inside the assets explained it.
+  - The port of `CityHash64` matches the engine's source line by line and was verified against a real `.utoc`.
+  - The `.utoc` (written by retoc, version 8): a 144-byte header; of 43 chunks, 26 are package data, 16 bulk data and 1 the container header; it has a directory index.
+  - In the second pass, which looks for the owners of heap blocks, many unrelated objects were reported as owners unless starting points inside other objects were excluded; the walk back now stops at another object.
+  - The scan range was narrowed from the whole process to the allocations holding engine objects plus the image's data; the reason is in DECISIONS.
+- Meanwhile the user closed the game and deleted `blackbird_4_P`; only `blackbird_2_P` was left in the mod folder.
+- Test: `test\run.ps1` passed, including four checks of the probe report.
+- Deployed: v0.3.0 copied into the game's Win64 folder. Not committed.
 
-## 2026-10-10 - v0.3.0 真游戏里没找到对象表，做 v0.3.1
+## 2026-10-10 - v0.3.0 finds no object table in the game; v0.3.1
 
-- 用户反馈换成其他角色好几分钟了一直没响。日志：名字池找到，“没找到对象表”，探测关闭。
-- 教训：让用户等提示音之前，没有先让他看日志确认探测可用；插件也没有在探测不可用时出声。两点都已改。
-- 核对了 UE 5.6 的 `FChunkedFixedUObjectArray`：成员顺序与假设一致；`PreAllocate` 里 `MaxChunks = Max / 65536 + 1`、`MaxElements = MaxChunks * 65536`，预分配时 `NumChunks = MaxChunks`。v0.3.0 要求块数与对象数成固定关系，预分配时会被排除。
-- v0.3.1：按计数特征识别，失败时记录现场数据，另加按内容查找的兜底，探测不可用时出一声低音。`test\run.ps1` 通过。
-- 未部署（游戏在运行，PID 40260）。未提交。
+- The user reported having switched to another character minutes ago without hearing anything. Log: name pool found, object table not found, probing disabled.
+- Lesson: before having the user wait for a sound, the log should have been checked to see that probing was available; and the plugin made no sound when it was not. Both were changed.
+- Checked `FChunkedFixedUObjectArray` in UE 5.6: the member order is as assumed; in `PreAllocate`, `MaxChunks = Max / 65536 + 1` and `MaxElements = MaxChunks * 65536`, and with preallocation `NumChunks = MaxChunks`. v0.3.0 required a fixed relation between chunk count and object count, which excludes the preallocated case.
+- v0.3.1: recognition by the count pattern, the data found is logged on failure, a fallback that searches by content, and a low tone when probing is unavailable. `test\run.ps1` passed.
+- Not deployed (game running, PID 40260). Not committed.
 
-## 2026-10-10 - v0.3.1 仍找不到对象表，判断是时机问题，做 v0.3.2
+## 2026-10-10 - v0.3.1 still finds no object table; a matter of timing; v0.3.2
 
-- 用户关游戏后部署了 v0.3.1，重启进游戏。日志：名字池找到（当前块 297），没有任何形似对象表计数的位置，按内容也找不到。
-- 对照时间线发现两次查找都发生在插件启动后约 4 秒，窗口出现前约 14 秒。替身宿主是先建好对象表再加载插件，所以测试没暴露这个问题。
-- v0.3.2：窗口出现后再找，挂载时重试；加 GEngine 核对行和类大小标定失败时的现场记录；宿主改成晚建对象表。`test\run.ps1` 通过。
-- 未部署（游戏在运行，PID 15180）。未提交。
-- 教训：宿主的启动顺序要和真引擎一致，否则时机类的问题测不出来。
+- After the user closed the game v0.3.1 was deployed, and they went back in. Log: name pool found (current block 297), nothing shaped like the object table's counts, and nothing found by content either.
+- The timeline showed that both searches ran about 4 seconds after the plugin started and about 14 seconds before the window appeared. The stand-in host built its object table before loading the plugin, so the test never showed this.
+- v0.3.2: search once the window exists and retry at a mount; a line that cross-checks GEngine and the data found when calibrating the class size fails; the host now builds its object table late. `test\run.ps1` passed.
+- Not deployed (game running, PID 15180). Not committed.
+- Lesson: the host's startup order has to match the real engine, or timing problems go unseen.
 
-## 2026-10-10 - v0.3.2 找到对象表，做 v0.3.3（类大小偏移加指令文件）
+## 2026-10-10 - v0.3.2 finds the object table; v0.3.3 (class size offset, command file)
 
-- 部署 v0.3.2 时游戏进程还没退干净，`deploy.ps1` 拒绝了一次，等进程退出后成功。
-- 用户进游戏后日志：窗口出现后一次找到对象表，时机判断被证实。类大小字段标定失败，日志里的现场数据显示它在 0x60，且对齐值是 16 位。
-- v0.3.3：标定只比较对齐值低 16 位；新增 `HTReload.cmd.txt` 指令文件（`gc`、`probe`），以后探测由我触发，不再让用户反复打包和等提示音。宿主测试加了指令文件的检查，`test\run.ps1` 通过。
-- 未部署（游戏在运行，PID 25312）。未提交。
-- 到这里已经让用户为探测重启了三次游戏，还需要第四次。指令文件就是为了以后不再这样。
+- When v0.3.2 was deployed the game process had not fully exited, so `deploy.ps1` refused once and succeeded after the process was gone.
+- With the user in the game, the log showed the object table found at the first try after the window appeared, which confirmed the timing diagnosis. Calibrating the class size field failed, and the logged data showed the alignment value to be 16 bits wide.
+- v0.3.3: calibration compares only the low 16 bits of the alignment; the command file `HTReload.cmd.txt` (`gc`, `probe`) was added, so that probes are triggered by the assistant from then on instead of by the user packaging and waiting for sounds. The host test got a check of the command file; `test\run.ps1` passed.
+- Not deployed (game running, PID 25312). Not committed.
+- By this point probing had cost the user three restarts of the game, with a fourth to come. The command file exists so that this does not happen again.
 
-## 2026-10-10 - v0.3.3 第一次真实探测，摸清谁引用着旧资产
+## 2026-10-10 - v0.3.3, the first real probe: who references the old assets
 
-- 用户问“把皮肤换成别的”是不是换角色。说明了是同一角色的外观；没有别的外观就切换场上角色。
-- 用户进游戏、黑鸟在场上。日志确认对象系统三项都成功，类大小字段偏移是 0x58（我之前数错成 0x60，已更正）。
-- 通过指令文件触发 `probe worn blackbird`，1.1 秒完成。结果见 CURRENT_STATE：直接引用骨骼网格的是场上角色及其组件、游戏的外观资产 `MeshAsset_Player042`、大招演出蓝图的默认对象和序列模板。
-- 查引擎源码和游戏可执行文件：`ReloadPackages` 被裁掉了；加载器的“改名后重载”逻辑还在；几个需要的脚本函数都在。据此写下了原地完全重载的原理路线。
-- 没有改功能代码（只更正了一处注释），没有重新构建和部署。未提交。
+- The user asked whether "change the skin to something else" meant changing the character. Explained: another appearance of the same character; with no other appearance, switch the character on the field.
+- With the user in the game and Blackbird on the field, the log confirmed all three parts of the object system; the class size field is at 0x58 (the assistant had miscounted it as 0x60 earlier; corrected).
+- `probe worn blackbird` through the command file took 1.1 seconds. Direct references to the skeletal mesh come from the character on the field and its component, the game's appearance asset `MeshAsset_Player042`, and the default object and the sequence template of the ultimate-skill cinematic blueprint.
+- From the engine source and the game executable: `ReloadPackages` is stripped; the loader's handling of renamed packages is still there; the script functions needed all exist. The outline of a complete in-place reload was written down from this.
+- No functional change (one comment corrected), no rebuild or redeploy. Not committed.
 
-## 2026-10-10 - 第二次探测：角色不在场上时对象照样活着
+## 2026-10-10 - Second probe: the objects stay alive with the character off the field
 
-- 用户把场上角色切换成别人。通过指令文件 `gc 15` 后 `probe away blackbird`。
-- 结果：旧对象一个没少，直接引用者与在场时逐行相同。角色对象和它身上的组件、动态材质、动画蓝图实例在切换后仍然存在。
-- 结论：靠任何“切换”让游戏放手都行不通，只能原地替换，或者像返回登录那样整个世界重来。
-- 向用户说明了原地完全重载的路线、工作量和风险，等用户决定。
-- 没有改代码。未提交。
+- The user switched the character on the field to another one. `gc 15` and then `probe away blackbird` through the command file.
+- Result: not one old object fewer, and the direct referrers identical line for line. The character object, its components, dynamic materials and anim blueprint instance all still exist after the switch.
+- Conclusion: no kind of switching makes the game let go; the only ways are replacing in place or starting the whole world over, as returning to login does.
+- The route, the amount of work and the risks of a complete in-place reload were explained to the user, who was left to decide.
+- No code change. Not committed.
 
-## 2026-10-10 - 用户要求自己实现重载，做 v0.4.0 打基础
+## 2026-10-10 - The user asks for the reload to be implemented; v0.4.0 lays the ground
 
-- 用户问：既然加载器里有“改名后重载”的逻辑，为什么不能在插件里写“重新加载包并修正所有引用”。答复：可以，这正是提议的做法，随即开工。
-- 核对了 `UObject::Rename`（`Obj.cpp:238`，有可用的日志字符串，包类重写了它）和 `UObject::ProcessEvent`（`ScriptCore.cpp:2032`，只有 `checkf` 字符串）的源码，定下各自的定位办法，见 CURRENT_STATE。
-- 实现 v0.4.0：外壳与核心拆分、运行中更换核心、十条只读查看指令、`deploy.ps1` 支持游戏运行时只换核心。
-- 测试宿主改成由脚本通知退出；测试新增“运行中更换核心后仍能应答指令、且不重复挂载”。`test\run.ps1` 通过。
-- 测试脚本里踩到一个坑：把 `{ … }.GetNewClosure()` 直接当命令参数传，条件永远不成立。改成普通循环。
-- 用户期间自己关了游戏。部署了外壳和核心，哈希见 CURRENT_STATE。未提交。
-- 接下来：用户启动游戏后验证 v0.4.0，然后用查看指令找入口。
+- The user asked why, given that the loader has the logic for loading again after a rename, the plugin could not "reload the packages and fix up all references" itself. Answer: it can, that is the proposal; work started.
+- Checked the source of `UObject::Rename` (`Obj.cpp:238`, with a usable log string; the package class overrides it) and `UObject::ProcessEvent` (`ScriptCore.cpp:2032`, only a `checkf` string) and settled how to locate each.
+- v0.4.0: split into shell and core, replacing the core at run time, ten read-only inspection commands, `deploy.ps1` able to replace just the core while the game runs.
+- The test host now quits on a signal from the script; the test gained "after the core is replaced at run time it still answers commands and does not mount again". `test\run.ps1` passed.
+- A trap in the test script: `{ … }.GetNewClosure()` passed directly as a command argument never made the condition true. A plain loop instead.
+- The user had closed the game meanwhile. Shell and core deployed. Not committed.
 
-## 2026-10-10 - 提交 v0.3.0 到 v0.4.0，立下“每次改完都提交”的规矩
+## 2026-10-10 - v0.3.0 to v0.4.0 committed; the rule to commit after every change
 
-- 用户要求先把代码提交，并规定以后每次改完都要提交，不然越堆越多。
-- 提交 `905f860`：32 个文件，2742 行新增、242 行删除，是 v0.2.0 之后攒下的全部改动。推送到 `origin/main`，`ls-remote` 核对一致。
-- 规矩写进了 PROJECT_OVERVIEW 的长期约束和 `project-memory-keeper` Skill。推送是我沿用之前的做法，用户这次只说了提交。
-- 随后补一个只更新记忆文件的提交。
-- 教训：从 v0.3.0 起我一直以“用户没要求”为由不提交，结果四个版本混在一个提交里，历史没法按版本回看。
+- The user asked for the code to be committed first and ruled that every change is to be committed from now on, so that work does not pile up.
+- Commit `905f860`: 32 files, 2742 lines added and 242 removed, everything accumulated since v0.2.0. Pushed to `origin/main`, checked with `ls-remote`.
+- The rule went into the standing constraints of PROJECT_OVERVIEW and into the `project-memory-keeper` skill. Pushing continues the earlier practice; the user only said to commit.
+- A commit with only memory updates followed.
+- Lesson: from v0.3.0 on, nothing had been committed on the grounds that the user had not asked, and four versions ended up in one commit whose history cannot be read version by version.
 
-## 2026-10-10 - v0.4.0 真游戏验证，找到并验证改名和 ProcessEvent
+## 2026-10-10 - v0.4.0 verified in the game; Rename and ProcessEvent found and verified
 
-- 用户进游戏。外壳和核心在真游戏里正常；第一次在游戏运行中更换核心成功（之后又换了两次）。
-- 发现并修掉：核心读“第几次加载”时外壳已经加过一，所以开局那 3 秒没等。改成在 `CoreStart` 里先记下。
-- 发现 `build.ps1` 每次都重建外壳会让它的字节变化，导致游戏运行时无法部署；改成外壳源码没变就不重建。
-- 用查看指令查到：改名的两句日志文字在，但没有代码直接引用，原因是 `UE_LOG` 把文字放在静态记录里。给 `strref` 加了“经由指针”的查找后，两句都指向同一个函数 RVA `0x181e3b0`。
-- 对比网格对象和包对象的虚表，确定 `Rename` 在第 46 项；第 76 项那个 0x3e8 字节的公共函数反汇编后确认是 `ProcessEvent`，并顺带核对了 `UFunction`、`FProperty` 的若干偏移。
-- 写了 `tools\ask.ps1`、`tools\disasm.ps1`。反汇编脚本改过两次地址换算规则：只有单独的跳转目标和方括号里紧跟的地址才换算，寄存器加偏移、立即数、段偏移不动。
-- 核心 0.5.0：`engine`、`calltest`、`plan`、`renameload`。`calltest` 在真游戏里成功。`renameload` 写好未运行。
-- 提交：`20d65a3`（核心 0.4.1）、`f8d54b1`（核心 0.5.0），都已推送。
-- 接下来：等用户确认后做第一次写操作。
+- With the user in the game, shell and core worked there; the first replacement of the core in a running game succeeded (and two more after it).
+- Found and fixed: when the core read the load count, the shell had already advanced it, so the initial 3 second wait was skipped. It is now recorded in `CoreStart`.
+- Found that `build.ps1` rebuilding the shell every time changed its bytes, which made deploying impossible while the game ran; the shell is now only rebuilt when its sources changed.
+- With the inspection commands: the two log texts of the rename exist, but no code references them directly, because `UE_LOG` keeps the text in a static record. With a lookup "through a pointer" added to `strref`, both lead to the same function, RVA `0x181e3b0`.
+- Comparing the vtables of a mesh object and a package object put `Rename` in slot 46; the shared 0x3e8-byte function in slot 76 was confirmed as `ProcessEvent` by disassembly, which also confirmed several offsets of `UFunction` and `FProperty`.
+- `tools\ask.ps1` and `tools\disasm.ps1` were written. The address conversion of the disassembly script was revised twice: only a lone branch target and an address directly inside brackets are converted; register plus displacement, immediates and segment offsets are left.
+- Core 0.5.0: `engine`, `calltest`, `plan`, `renameload`. `calltest` succeeded in the game. `renameload` was written but not run.
+- Commits: `20d65a3` (core 0.4.1), `f8d54b1` (core 0.5.0), both pushed.
 
-## 2026-10-10 - 原地完全重载跑通，用户确认看到效果
+## 2026-10-10 - Complete in-place reload works; the user confirms seeing the change
 
-- 用户同意后执行 `renameload 042_blackbird_body_d`：改名成功，加载出一个不同的新对象，新旧并存，游戏正常。
-- 加了 `functions`、`props` 两条查看指令，查到游戏给 40 个材质槽都建了动态材质，以及 `CopyParameterOverrides` 可以把新父材质推给渲染线程。
-- 核心 0.6.0：`Reloader::Reload`，一个游戏线程任务里做完改名、加载、改写、换父材质、重设网格。`plan` 改成和它共用同一套分类。
-- 执行前用选择题问过用户（内容相同、只验证稳定性），用户选“现在执行”。17:34 第一次完整重载成功，约 1.3 秒，回收后旧包一个不剩。
-- 复查时发现两个假槽位：世界分区单元对象的名字字段数值等于 Mod 里两个对象的地址。核心 0.6.1 加防护。
-- 用户打包了 `blackbird_4_P`（自动挂载），让我重载。17:43 第二次重载成功，**用户说“可以的，我看到效果了”**。
-- 核心 0.6.2：挂载成功后自动重载，结果分三种，加第三声提示音，重设网格后复查组件上的槽位。17:44 部署到运行中的游戏，还没有被真实的新包触发过。
-- 观察到游戏在网格重设时自己重建布料的动态材质和描边材质，身体两个槽变成了材质本身。记在 KNOWN_ISSUES。
-- 提交并推送：`5590bf6`、`cf3dd15`、`fcdc7cc`，随后是这次记忆更新。
-- 接下来：等用户下次打包验证自动重载。
+- With the user's agreement, `renameload 042_blackbird_body_d`: the rename succeeded and the load returned a different, new object; old and new coexisted and the game was fine.
+- The inspection commands `functions` and `props` were added; they showed that the game creates dynamic materials for all 40 material slots and that `CopyParameterOverrides` can push a new parent to the render thread.
+- Core 0.6.0: `Reloader::Reload`, with rename, load, rewrite, reparent and mesh reset in one game-thread task. `plan` now shares the same classification.
+- Before running it the user was asked (identical content, a stability check only) and chose to run it now. The first complete reload succeeded at 17:34 in about 1.3 seconds; after collection no old package was left.
+- Reviewing it turned up two false slots: the name fields of world partition cell objects equal to the addresses of two objects of the mod. Core 0.6.1 added the guard.
+- The user packaged `blackbird_4_P` (mounted automatically) and asked for a reload. The second reload succeeded at 17:43, and **the user said it worked and the change was visible**.
+- Core 0.6.2: automatic reload after a mount, three kinds of result, a third tone, and a check of the component's slots after the mesh reset. Deployed into the running game at 17:44.
+- Observed that the game rebuilds the cloth's dynamic and outline materials itself when the mesh is reset, and that the two body slots end up holding the material itself. Recorded in KNOWN_ISSUES.
+- Committed and pushed: `5590bf6`, `cf3dd15`, `fcdc7cc`, then the memory update.
 
-## 2026-10-10 - 发布 release v0.6.2
+## 2026-10-10 - Release v0.6.2 published
 
-- 用户要求去 GitHub 发一个 release。
-- 发现仓库现在是公开的（之前记录是私有）。可见性不是我改的。照常发布，并在回复里告诉了用户这个 release 是公开可下载的。
-- README 过时（还写着要返回登录界面、以及已删掉的自动探测），先重写：加了风险、安装、已知限制、重载原理。提交 `f22f629`。
-- `gh release create v0.6.2`：标签指向 `f22f629`，附件 `HTReload-0.6.2.zip`，里面的外壳和核心与游戏里运行的哈希一致。说明里如实写了“自动触发重载还没在真游戏里走过”。
-- 没有加许可证文件，用户没提。
+- The user asked for a release on GitHub.
+- The repository turned out to be public (the record said private). The visibility was not changed by the assistant. The release went ahead, and the user was told that it is publicly downloadable.
+- The README was out of date (it still described returning to the login screen and the automatic probe that had been removed) and was rewritten first: risks, installation, known limits, how the reload works. Commit `f22f629`.
+- `gh release create v0.6.2`: the tag points at `f22f629`, the attachment is `HTReload-0.6.2.zip`, and the shell and core in it have the same hashes as the ones running in the game. The notes said plainly that the automatically triggered reload had not yet run in the game.
+- No licence file was added; the user had not mentioned one.
 
-## 2026-10-10 - 自动重载在真游戏里确认；做了重载后卸载旧容器
+## 2026-10-10 - Automatic reload confirmed in the game; unmounting old containers after a reload
 
-- 用户问旧三件套运行时能不能删。实测（只申请删除权限）：已挂载版本的 `.ucas`、`.utoc` 都锁着，`.pak` 没锁。回答不能，并提了卸载方案。
-- 从日志看到自动重载已成功两次（17:52，以及用户重启游戏后的 18:10）。
-- 用户说“做吧，重载后自动卸载旧容器”。
-- 游戏文件里确认有 `Unmounting pak file: %s \n` 正好一处。当时游戏已关，没能在运行中的游戏里查引用。
-- 核心 0.7.0：`FindUnmountHandler`、`ShadowedContainers`、`UnmountShadowed`、`UnmountWhenCollected`、`Reloader::RetiredPackagesAlive`，指令 `shadowed`、`unmount`。把扫描委托实例的循环抽成了 `ForEachInstanceWord`，挂载和卸载共用。
-- 替身宿主：挂载时像引擎一样占住 `.ucas`、`.utoc`，加了卸载处理函数和第二个委托。测试新增：只有一个版本时不卸；两个版本时只卸旧的，旧文件放开，新文件仍被占。通过。
-- 提交 `5bd5e1c` 并推送。游戏关着时部署了核心，哈希见 CURRENT_STATE。README 补了说明。
-- 真游戏里还没跑过卸载。没有发新的 release。
+- The user asked whether the old three files can be deleted while the game runs. Measured by asking for delete access only: the `.ucas` and `.utoc` of mounted versions are locked, the `.pak` is not. Answered no, and proposed unmounting.
+- The log showed that the automatic reload had already succeeded twice (17:52, and 18:10 after the user restarted the game).
+- The user asked for old containers to be unmounted automatically after a reload.
+- The game's file was confirmed to contain `Unmounting pak file: %s \n` exactly once. The game was closed at the time, so the references could not be looked up in a running game.
+- Core 0.7.0: `FindUnmountHandler`, `ShadowedContainers`, `UnmountShadowed`, `UnmountWhenCollected`, `Reloader::RetiredPackagesAlive`, the commands `shadowed` and `unmount`. The loop that scans delegate instances became `ForEachInstanceWord`, shared by mount and unmount.
+- Stand-in host: it holds `.ucas` and `.utoc` open on mounting, as the engine does, and got an unmount handler and a second delegate. New in the test: nothing is unmounted with one version; with two, only the old one, whose files are let go while the new one stays held. Passed.
+- Commit `5bd5e1c`, pushed. The core was deployed with the game closed. The README got a section on it.
+- Unmounting had not run in the game yet. No new release.
 
-## 2026-10-10 - 卸载在真游戏里成功；加上卸载后直接删除
+## 2026-10-10 - Unmounting works in the game; deleting right after it
 
-- 用户说“可以删的”，并要求卸载的同时直接删除文件。
-- 日志确认 0.7.0 在真游戏里的表现：入口 RVA `0x27b29d0`；18:24 重载完成 6 秒后卸载了 `blackbird_4_P`（启动时由引擎挂载的那个）。
-- 核心 0.7.1：`DeleteContainer`；`mounted_` 改成带挂载次序的表；`MountedModContainers` 抽出来给卸载判定和“编号太小”的提示共用。
-- 测试新增第三个包 `hot_0_P`（编号更小、后发布）：有提示，不被卸载也不被删；`hot_1_P` 三个文件被删；`hot_2_P` 完好。通过。
-- 提交 `61c63ed` 并推送，游戏关着时部署。README 和记忆已更新。
-- 提醒了用户：删除是永久的；他一直留作底版的 `blackbird_4_P` 下次重载后会被删。
+- The user said the files could be deleted, and asked for them to be deleted directly together with the unmount.
+- The log confirmed how 0.7.0 behaved in the game: entry RVA `0x27b29d0`; at 18:24, 6 seconds after the reload was done, `blackbird_4_P` (the one the engine had mounted at startup) was unmounted.
+- Core 0.7.1: `DeleteContainer`; `mounted_` became a table with the mount sequence; `MountedModContainers` was split out, shared by the unmount rule and the note about a number that is too low.
+- New in the test: a third pak `hot_0_P` (lower number, published later) gets the note and is neither unmounted nor deleted; the three files of `hot_1_P` are deleted; `hot_2_P` is intact. Passed.
+- Commit `61c63ed`, pushed, deployed with the game closed. README and memory updated.
+- The user was reminded that deleting is permanent and that `blackbird_4_P`, which they had been keeping as a base version, would be deleted after the next reload.
 
-## 2026-10-10 - 0.7.1 真游戏验证，发布 release v0.7.1
+## 2026-10-10 - 0.7.1 verified in the game; release v0.7.1
 
-- 用户进游戏打包后让我看日志并发 release。
-- 日志（18:39 启动的运行）：挂载 `blackbird_5_P` → 2 秒后重载完成 → 再 6 秒“卸载: blackbird_4_P: 已卸载并删除”。文件夹里只剩 5，游戏正常。
-- `gh release create v0.7.1`，指向 `07d9329`，附件里的两个二进制先和游戏里运行的哈希比对过才打包。说明里写了相比 0.6.2 的变化、删除是永久的、验证次数。
-- 打包 release 时一条带 `Remove-Item` 的命令被环境拦下（路径里有空格被误判）。改成不删、直接覆盖。
+- The user packaged in the game and asked for a look at the log and for a release.
+- Log (the run started at 18:39): `blackbird_5_P` mounted → reload done 2 seconds later → 6 seconds after that `blackbird_4_P` unmounted and deleted. Only 5 was left in the folder and the game was fine.
+- `gh release create v0.7.1`, pointing at `07d9329`; the two binaries in the attachment were compared by hash with the ones running in the game before packaging. The notes cover the changes since 0.6.2, that deleting is permanent, and how often each part was verified.
+- While the release was being packaged, a command containing `Remove-Item` was blocked by the environment (a path with a space was misjudged). Overwriting instead of deleting solved it.
 
-## 2026-10-10 - 打包器加自动编号
+## 2026-10-10 - Automatic numbering in the packager
 
-- 用户：“把打包器的自动编号也做了，我输入的方式还是和原来一样，你额外添加自动编号”。
-- 打包器是独立仓库（路径见 CURRENT_STATE）。用户平时输入的是带编号的全名（设置里存的是 `blackbird_5_P`）。
-- 做法：加一个勾选框，输入框不动；勾上后输出名取“已有最大编号 + 1”。两种输入习惯（`blackbird_P` 或 `blackbird_5_P`）都能用。界面在名称下方、输出计划、任务控制台显示实际输出名。
-- 默认关闭，是我的判断：打包器是公开工具，其他人不配合热重载用的话，默认开会让每次打包都多留一份三件套。用户自己的设置我替他打开了，并在回复里说明。
-- 验证方式：命名规则的检查程序；启动新 exe 截图看界面；界面自动化跑一次真实打包到临时目录（5 秒，生成 `blackbird_6_P`）。测试时备份并还原了用户的设置文件，临时输出已删除。
-- 打包器版本 2.5 → 2.6，本地提交 `de16cb0`，没有推送。
+- The user asked for the packager's automatic numbering as well, with their way of entering the name left as it was.
+- The packager is a separate repository. The user normally types the full name with its number (`blackbird_5_P` was stored in the settings).
+- What was done: a checkbox, with the name field untouched; when it is on, the output name is one more than the highest number present. Both habits of typing (`blackbird_P` or `blackbird_5_P`) work. The window shows the actual output name below the name field, in the output plan and in the task console.
+- Off by default, which was the assistant's judgement: the packager is a public tool, and for people who do not use it with hot reload a default of on would leave one more set of files with every build. It was switched on in the user's own settings, and the user was told.
+- Verified with a check program for the naming rule, by starting the new exe and looking at a capture of the window, and with one real build driven through UI automation into a scratch directory (5 seconds, producing `blackbird_6_P`). The user's settings file was backed up and restored around the test and the scratch output deleted.
+- Packager 2.5 → 2.6, local commit `de16cb0`, not pushed.
+
+## 2026-10-10 - A review of the project, and a question about blueprints
+
+- The user showed a review of the project written elsewhere and asked for an opinion. Its main finding holds: `Reload` returns `Done` whenever nothing aborted, even when an asset produced no new object or a slot was not replaced. Added to KNOWN_ISSUES and TASKS. Not fixed; the user is to say who does it, since another assistant appears to be reading the same repository.
+- The user asked whether blueprint changes, an added toggle for example, take effect after a reload. Answer: expected to, since the toggle logic lives in the anim blueprint, whose instance the engine recreates from the new class when the mesh is reset (observed in every reload so far); the save class and the panel follow from there. Not tried with a real blueprint change. Advice given: close the panel before publishing.
+
+## 2026-10-11 - Messages reworded, documentation rewritten
+
+- Core 0.7.2: the log and report messages in `shell/shell.cpp` and seven files under `src/` were reworded; `test/run.ps1` and `tools/ask.ps1` now look for `Ready:` and `Command done:`. `test\run.ps1` passed. Commit `3716259`.
+- README and the seven memory files were rewritten. PROJECT_OVERVIEW also lost a stale list of things "not done" that had since been done.
+- The shell changed with this, so it can only be deployed with the game closed.

@@ -2,32 +2,35 @@
 
 ## In Progress
 
-- 无。
+- None.
 
 ## Next
 
-- 打包器的自动编号已做（见 Completed）。提交在打包器仓库本地，还没推送，等用户说。
-- 身体两个材质槽在重载后没有动态材质（见 KNOWN_ISSUES）。等用户反馈有没有可见问题再决定做不做。
-- 不在对象体内的引用（`TArray`、`TMap` 的堆存储）目前不改写。黑鸟这个 Mod 不受影响，因为引用它资产的东西要么在包内、要么是对象体内的指针。只换材质或贴图、网格用游戏本体的 Mod 会受影响（网格的材质数组在堆上）。要用反射遍历容器来做。
+- Tighten the verdict of a reload: a third result for "partly done" and a final line after the collection window on whether every old object went away (see KNOWN_ISSUES). Raised by a review on 2026-10-10; the user has not said who is to do it.
+- The packager's automatic numbering is done (see Completed). The commit is local to the packager's repository and not pushed; waiting for the user.
+- Two body material slots have no dynamic material after a reload (see KNOWN_ISSUES). Decide once the user reports whether anything is visibly wrong.
+- References outside object bodies (the heap storage of `TArray` and `TMap`) are not rewritten. The Blackbird mod is not affected, since whatever references its assets is either inside the pack or a pointer in an object body. A mod that only replaces materials or textures and uses a mesh of the game is affected (the mesh's material array is on the heap). Needs a walk over container properties through reflection.
+- A reload after a blueprint change (an added toggle, for example) has not been tried. Expected to work when the panel is closed while publishing; the user was told what to watch for.
 
 ## Pending
 
-- 搁置：贴图靠重新流送即时刷新。完整重载已经覆盖。
-- 可选：配置文件（自动重载开关、提示音、监视目录、回收窗口时长）。
-- 可选：以后改用 NTE Bridge 时，把换名发布接到桥接的 `_publish_outputs`（`NTE bridge/blender_addon/nte_bridge/packaging.py`）。
+- Shelved: instant texture refresh through re-streaming. The complete reload covers it.
+- Optional: a configuration file (switch for the automatic reload, sounds, watched directory, length of the collection window).
+- Optional: when NTE Bridge is used later, hook publishing under a new name into the bridge's `_publish_outputs` (`NTE bridge/blender_addon/nte_bridge/packaging.py`).
 
 ## Completed
 
-- 2026-10-10：v0.1.0 源码、构建脚本、替身宿主和端到端测试、部署脚本、README、记忆系统。
-- 2026-10-10：真游戏里验证运行时定位和挂载。
-- 2026-10-10：v0.2.0 主动垃圾回收请求。已部署并验证，已提交 `7210708` 并推送到 `loyal37/HT-Reload`（私有）。
-- 2026-10-10：确认返回登录界面再进入可以在不重启进程的情况下完全刷新。
-- 2026-10-10：v0.3.0–v0.3.3 对象表读取、引用探测、指令文件。两次真实探测摸清了引用者。
-- 2026-10-10：v0.4.0 外壳与核心拆分、运行中更换核心、只读查看指令。v0.3.0 到 v0.4.0 一并提交为 `905f860`。
-- 2026-10-10：核心 0.5.0，找到并验证 `Rename`、`ProcessEvent`，试调用成功，`renameload` 在真游戏里成功。
-- 2026-10-10：核心 0.6.0–0.6.2，**原地完全重载**。真游戏里手动重载两次成功，第二次是用户新打包的 `blackbird_4_P`，用户确认看到效果，旧对象全部回收。提交 `5590bf6`、`cf3dd15`、`fcdc7cc`。
-- 2026-10-10：挂载后自动重载在真游戏里成功两次（17:52、18:10，后一次是重启游戏后的新运行）。
-- 2026-10-10：发布 release `v0.6.2`。
-- 2026-10-10：核心 0.7.0，重载后自动卸载被取代的旧容器。真游戏里成功（18:24 卸载了启动时挂载的 `blackbird_4_P`），用户确认文件可删。提交 `5bd5e1c`。
-- 2026-10-10：核心 0.7.1，卸载后直接删除旧三件套。真游戏里成功（18:41 卸载并删除了 `blackbird_4_P`）。提交 `61c63ed`。发布 release `v0.7.1`。
-- 2026-10-10：打包器（另一个仓库，`D:\Neverness to Everness Mod Loader\cook\packager`，`loyal37/NTE-Mod-Packager`）2.6 加了“自动编号”。本地提交 `de16cb0`，未推送。
+- 2026-10-10: v0.1.0, sources, build scripts, stand-in host and end-to-end test, deploy script, README, project memory.
+- 2026-10-10: locating and mounting at run time verified in the game.
+- 2026-10-10: v0.2.0, active collection requests. Deployed and verified, committed as `7210708` and pushed to `loyal37/HT-Reload`.
+- 2026-10-10: confirmed that returning to the login screen and entering again refreshes everything without restarting the process.
+- 2026-10-10: v0.3.0–v0.3.3, reading the object table, the reference probe, the command file. Two probes in the game showed who holds the references.
+- 2026-10-10: v0.4.0, split into shell and core, replacing the core at run time, read-only inspection commands. v0.3.0 to v0.4.0 went in together as `905f860`.
+- 2026-10-10: core 0.5.0, `Rename` and `ProcessEvent` found and verified, call test succeeded, `renameload` succeeded in the game.
+- 2026-10-10: core 0.6.0–0.6.2, **complete in-place reload**. Two manual reloads succeeded in the game, the second with the user's newly packaged `blackbird_4_P`; the user confirmed seeing the change, and all old objects were collected. Commits `5590bf6`, `cf3dd15`, `fcdc7cc`.
+- 2026-10-10: the automatic reload after a mount succeeded twice in the game (17:52 and 18:10, the second in a new run after a restart).
+- 2026-10-10: release `v0.6.2` published.
+- 2026-10-10: core 0.7.0, old containers that are superseded are unmounted after a reload. Succeeded in the game (at 18:24 `blackbird_4_P`, mounted at startup, was unmounted); the user confirmed the files could be deleted. Commit `5bd5e1c`.
+- 2026-10-10: core 0.7.1, the old three files are deleted right after the unmount. Succeeded in the game (at 18:41 `blackbird_4_P` was unmounted and deleted). Commit `61c63ed`. Release `v0.7.1` published.
+- 2026-10-10: the packager (a separate repository, `D:\Neverness to Everness Mod Loader\cook\packager`, `loyal37/NTE-Mod-Packager`) got "automatic numbering" in 2.6. Local commit `de16cb0`, not pushed.
+- 2026-10-11: core 0.7.2, log and report messages reworded; README and project memory rewritten. Commit `3716259` and the one after it.

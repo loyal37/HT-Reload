@@ -1,84 +1,87 @@
 # HT Reload
 
-《异环》pak Mod 的热重载插件。游戏运行期间，把新名字的 Mod 三件套放进 `HT\Content\Paks` 下任意位置，插件会让引擎挂载它，并把内存里已经加载的旧资产原地换成新版本。不用重启游戏，也不用返回登录界面。
+A hot reload plugin for pak mods of Neverness to Everness. While the game is running, drop the three files of a mod under a new name anywhere below `HT\Content\Paks`: the plugin has the engine mount them and replaces the assets that are already loaded with the new version, in place. No restart, and no trip back to the login screen.
 
-仅用于自己制作 Mod 时的迭代，不随 Mod 分发。
+It is meant for iterating on a mod of your own. It is not something to ship to players with a mod.
 
-## 风险
+## Risks
 
-游戏带反作弊。插件会读取游戏内存、在游戏窗口线程上装消息钩子、调用引擎函数并改写引擎对象里的指针。它不做任何规避检测的事，反作弊会不会因此处理账号无法判断。请自行承担风险，建议只在小号上用。
+The game has anti-cheat. The plugin reads the game's memory, installs a message hook on the thread of the game window, calls engine functions and rewrites pointers in engine objects. It does nothing to evade detection, and whether the anti-cheat acts on an account because of it cannot be judged. Use it at your own risk, preferably on a secondary account.
 
-重载会改动运行中的引擎状态，判断有误时游戏可能崩溃或卡死。
+A reload changes the state of the running engine. Where the plugin judges something wrongly, the game may crash or hang.
 
-## 安装
+The plugin deletes files: the older versions of a mod that a new version supersedes.
 
-1. 游戏的 `HT\Binaries\Win64` 目录里需要有 [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)（以 `dsound.dll` 的名字放置）。
-2. 把 `HTReload.asi` 和 `HTReload.core.dll` 放进同一个目录。
-3. 正常启动游戏。`Win64\HTReload.log` 里出现“就绪”说明可以用了。
+## Installation
 
-停用：把 `HTReload.asi` 改名或删除。
+1. The game's `HT\Binaries\Win64` folder needs [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader), placed there as `dsound.dll`.
+2. Put `HTReload.asi` and `HTReload.core.dll` into the same folder.
+3. Start the game as usual. Once `Win64\HTReload.log` says `Ready`, it can be used.
 
-## 使用
+To disable it, rename or delete `HTReload.asi`.
 
-1. 改完 Mod，打包。**游戏开着时名称必须换新的**，在 `_P` 前加递增数字，例如 `blackbird_1_P`、`blackbird_2_P`。同名文件被游戏占用，无法覆盖。
-2. 把新的 `.pak`、`.utoc`、`.ucas` 放进 `HT\Content\Paks` 下的 Mod 文件夹。
-3. 几秒内听到两声上行提示音，表示新包已挂载；紧接着第三声更高的提示音，表示重载完成，游戏里已经是新版本。重载时游戏会卡一下，包越多越久。
-4. 如果第三声是低音，表示重载没有完成，明细在 `Win64\HTReload.reload.txt`。这时返回登录界面再进入游戏，新版本仍然会生效。
+## Usage
 
-数字越大优先级越高，所以新版本一定压过旧版本。
+1. Change the mod and package it. **While the game is open the name has to be new**: an increasing number before `_P`, for example `blackbird_1_P`, `blackbird_2_P`. Files of the same name are held by the game and cannot be overwritten.
+2. Put the new `.pak`, `.utoc` and `.ucas` into the mod's folder below `HT\Content\Paks`.
+3. Within a few seconds two rising tones say that the new pak is mounted, and a third, higher tone right after them says that the reload is done and the game shows the new version. The game stands still for a moment during a reload, longer for more packages.
+4. If the third tone is low, the reload did not complete; the details are in `Win64\HTReload.reload.txt`. Returning to the login screen and entering the game again still brings the new version in.
 
-重载完成、旧资产被回收之后（通常十秒以内），插件会让引擎卸载被新版本完全取代的旧版本，并**直接删除它的三件套**（不进回收站）。想保留某个旧版本，请事先另存一份。
+A higher number means a higher priority, so a new version always wins over an older one.
 
-- “完全取代”指旧版本里的每个包在一个编号更大、且不比它早挂载的已挂载版本里都有。
-- 重载没有完成、或者还有旧资产没被回收时，不卸载也不删除，那样的旧版本要等退出游戏后手动删。
-- 新包的编号如果比已挂载的版本小，它不会生效，也不会被当成旧版本删掉，日志里会有提示。
+Once a reload is done and the old assets are collected (usually within ten seconds), the plugin has the engine unmount the older versions that the new one fully supersedes and **deletes their three files** (not to the recycle bin). Copy an old version elsewhere beforehand if you want to keep it.
 
-不要在游戏读条或切换场景时放入新包，那种时机没有验证过。
+- "Fully supersedes" means that every package of the old version is also in a mounted version with a higher number that was not mounted before it.
+- When a reload did not complete, or old assets have not been collected, nothing is unmounted or deleted; such an old version has to be deleted by hand after the game exits.
+- A new pak with a lower number than a mounted version does not take effect, and is not deleted as an old version either; the log has a note.
 
-## 已知限制
+Do not drop a new pak in while the game shows a loading screen or changes scenes. That has not been tried.
 
-- 只换材质或贴图、网格用游戏本体的 Mod，会漏掉一部分引用（存放在数组里的指针目前不改写）。网格、材质、贴图都在包里的 Mod 没有这个问题。
-- 重载后，场上角色身上部分材质槽不再是动态材质，受击、溶解这类效果在这些部位可能与初次进场时不同。返回登录界面再进入会恢复。
-- Mod 自带的界面或蓝图类如果当时有实例存在，实例仍是旧类的。
-- 只在 2026 年 10 月的客户端版本、一个角色 Mod 上验证过。
+## Known limits
 
-## 构建、测试、部署
+- A mod that only replaces materials or textures and uses a mesh of the game misses some references (pointers stored in arrays are not rewritten yet). A mod that brings its mesh, materials and textures does not have this problem.
+- After a reload, some material slots of the character on the field are no longer dynamic materials, so effects such as hit flashes or dissolves may differ on those parts from a fresh entry. Returning to the login screen and entering again restores them.
+- Instances of a mod's own widgets or blueprint classes that exist at that moment stay instances of the old class.
+- The high tone means that no step was aborted, not that every single reference was replaced; the report lists anything that was left.
+- Verified only on the client build of October 2026, with one character mod.
 
-需要带 C++ x64 工具集的 Visual Studio 2022。
+## Build, test, deploy
+
+Needs Visual Studio 2022 with the C++ x64 toolset.
 
 ```powershell
-.\build.ps1        # 生成 build\HTReload.asi（外壳）和 build\HTReload.core.dll（核心）
-.\test\run.ps1     # 用替身宿主做端到端测试，不需要启动游戏
-.\deploy.ps1       # 复制到游戏 Win64 目录
+.\build.ps1        # builds build\HTReload.asi (the shell) and build\HTReload.core.dll (the core)
+.\test\run.ps1     # end-to-end test against a stand-in host; the game is not needed
+.\deploy.ps1       # copies into the game's Win64 folder
 ```
 
-插件分成两部分。外壳 `HTReload.asi` 随游戏启动加载，常驻；核心 `HTReload.core.dll` 由外壳加载，文件一更新就自动换上新的。所以核心可以在游戏运行时部署，只有外壳变了才需要先关游戏。
+The plugin has two parts. The shell `HTReload.asi` is loaded when the game starts and stays. The core `HTReload.core.dll` is loaded by the shell and replaced as soon as the file changes. So the core can be deployed while the game runs; only a changed shell needs the game closed first.
 
-## 指令文件
+## The command file
 
-在游戏 `Win64` 目录写一个 `HTReload.cmd.txt`，每行一条指令，核心会在一秒内执行并删掉它，答案写到 `HTReload.out.txt`。`tools\ask.ps1` 可以代劳。
+Write a file `HTReload.cmd.txt` into the game's `Win64` folder, one command per line. The core runs it within a second and deletes it; the answers go to `HTReload.out.txt`. `tools\ask.ps1` does this for you.
 
-- `plan [过滤词]`：列出重载会做什么，不改任何东西。过滤词用来选磁盘上路径含它的 Mod 包。
-- `reload [过滤词]`：手动重载这些 Mod 包。
-- `shadowed`：列出已被新版本完全取代、可以卸载的 Mod 包，不改任何东西。
-- `unmount`：手动卸载这些 Mod 包并删除它们的文件。
-- `gc [秒数]`：请求一段时间的垃圾回收。
-- `probe <标签> [过滤词]`：报告这些 Mod 包对应的已加载对象，以及谁还引用着它们，追加到 `HTReload.probe.txt`。
-- `objects`、`obj`、`mem`、`vtable`、`code`、`strref`、`astrref`、`callers`、`names`、`refs`、`functions`、`props`：只读地查看引擎内部。说明见 `src\explore.h`。
+- `plan [filter]`: lists what a reload would do, without changing anything. The filter selects the mod paks on disk whose path contains it.
+- `reload [filter]`: reloads those mod paks by hand.
+- `shadowed`: lists the mod paks that a newer version fully supersedes and that could be unmounted, without changing anything.
+- `unmount`: unmounts those mod paks by hand and deletes their files.
+- `gc [seconds]`: requests garbage collections for that long.
+- `probe <label> [filter]`: reports the loaded objects that belong to those mod paks and who still references them, appended to `HTReload.probe.txt`.
+- `objects`, `obj`, `mem`, `vtable`, `code`, `strref`, `astrref`, `callers`, `names`, `refs`, `functions`, `props`: read-only views into the engine, described in `src\explore.h`.
 
-## 工作方式
+## How it works
 
-- 由 Ultimate ASI Loader 加载，只在 `HTGame.exe` 里生效。
-- 不修改游戏代码，不依赖固定地址。游戏的可执行文件在磁盘上是加密的，插件在运行后靠日志字符串、虚表位置和数据结构的形状定位引擎入口。
-- 每秒扫描一次 `Content\Paks`，新出现且写入完成的包才会处理；启动时已存在的包不处理。
-- 挂载：在游戏线程上调用引擎自己的 `FCoreDelegates::MountPak` 处理函数。
-- 重载：
-  1. 从新包的 `.utoc` 读出包 ID，对照引擎的对象表找出已加载的同名旧包。
-  2. 给旧包改名。加载器发现已加载的包改了名，就会丢掉记录，允许同名包重新加载。
-  3. 重新加载每个包里的资产，读到的是优先级最高的新包。
-  4. 把其他对象里指向旧资产的指针换成新资产：普通数据直接改写；动态材质保留对象、换父材质；场上的骨骼网格组件通过引擎的“设置网格”函数重设，让渲染状态和动画实例由引擎重建。
-  5. 请求垃圾回收，清掉旧对象。
-- 第 2 到第 4 步在游戏线程的同一个任务里做完。
-- 卸载：旧对象回收完之后，在游戏线程上调用引擎自己的 `FCoreDelegates::OnUnmountPak` 处理函数，引擎随之关闭旧容器的文件；确认文件已放开后删除。
+- Loaded by Ultimate ASI Loader; acts only inside `HTGame.exe`.
+- It changes no game code and relies on no fixed addresses. The game's executable is encrypted on disk, so the plugin locates the engine's entry points at run time, by log strings, vtable positions and the shape of data structures.
+- `Content\Paks` is scanned once a second. Only a pak that appears after startup and is completely written is handled; what is there at startup is left alone.
+- Mounting: the engine's own handler of `FCoreDelegates::MountPak` is called on the game thread.
+- Reloading:
+  1. The package ids are read from the new pak's `.utoc` and matched against the engine's object table to find the old packages of the same names that are loaded.
+  2. The old packages are renamed. When the loader finds a loaded package renamed, it drops its record, which allows a package of that name to be loaded again.
+  3. The assets of each package are loaded again, now from the new pak, which has the highest priority.
+  4. Pointers to old assets in other objects are replaced: plain data is rewritten; a dynamic material keeps its object and gets the new parent; a skeletal mesh component on the field is reset through the engine's "set mesh" function, so that the engine rebuilds its render state and anim instances.
+  5. Garbage collections are requested, which removes the old objects.
+- Steps 2 to 4 run in one task on the game thread.
+- Unmounting: when the old objects are collected, the engine's own handler of `FCoreDelegates::OnUnmountPak` is called on the game thread, and the engine closes the files of the old container; once they are confirmed to be let go, they are deleted.
 
-项目状态、设计依据和已知问题见 `.ai-memory\`。
+Project state, design notes and known issues are in `.ai-memory\`.

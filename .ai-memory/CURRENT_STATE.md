@@ -1,82 +1,80 @@
 # Current State
 
-## HT Reload (2026-10-10)
+## HT Reload (2026-10-11)
 
-- **原地完全重载已在真游戏里跑通，用户确认看到了效果。** 发布新版本后不用返回登录，网格、材质、贴图、动画蓝图都换成新版本，旧对象全部被回收。
-- **游戏目录里部署的是外壳 v0.4.0 + 核心 0.7.1**，目录 `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`：
-  - 外壳 `HTReload.asi`，SHA256 `0F2CB234A023A26F3F73FF09B56D3029C96682535E0D1DB6141916A467EA9720`，16:15 前后游戏关闭时部署，之后没变。
-  - 核心 `HTReload.core.dll`，SHA256 `6403822D1A00C4663391CB6B89CA6F2754262C733A07E62F93F602641DA5DC9B`，18:3x 游戏关闭时部署。Release `v0.7.1` 里就是这两个文件。
-- **核心 0.7.1 已在真游戏里验证**（18:39 启动的运行，PID 13032）：18:41:04 挂载 `blackbird_5_P`，18:41:06 重载完成（26/26，换父材质 16、改写 6、重设网格 1），18:41:12 日志“卸载: blackbird_4_P: 已卸载并删除”。之后 Mod 文件夹里只剩 `blackbird_5_P`，游戏正常响应。
-- **核心 0.7.0（重载后自动卸载旧容器）已在真游戏里验证**（18:22 启动的那次运行）：
-  - 启动日志“卸载: HandleUnmountPakDelegate RVA 0x27b29d0 大小 0x59”。
-  - 18:24:33 挂载 `blackbird_5_P`，18:24:35 重载完成，18:24:41 日志“卸载: blackbird_4_P: 已卸载，这个旧版本的三件套现在可以删除”。被卸载的是游戏启动时引擎自己挂载的容器，说明我传的路径写法和引擎启动时用的一致。
-  - 用户确认“可以删的”，游戏之后正常。
-- 核心 0.7.1 新增的是：卸载后直接删除旧三件套（用户要求“卸载句柄的同时直接删除文件就行了，不用等我来删除”），以及“编号起小了的新包不算旧版本”的防护。
-- 磁盘上现在只有 `blackbird_5_P`（18:41 打包的）。
-- git：`origin` = `https://github.com/loyal37/HT-Reload`。**仓库现在是公开的**（2026-10-10 发 release 时用 `gh` 查到；之前记录是私有，可见性是用户自己改的，我没有动过）。推送的内容包括 `.ai-memory` 任何人都能看到。
-- **Release `v0.7.1`**（最新，用户要求，2026-10-10 18:42）指向 `07d9329`，附件 `HTReload-0.7.1.zip`（外壳、核心、README），二进制与游戏里验证过的哈希相同。说明源稿 `build\release\notes-0.7.1.md`（不入库）。之前的 `v0.6.2` 指向 `f22f629`，还在。
-- 最新代码提交 `61c63ed`（核心 0.7.1），已推送。本轮的三个提交：`5590bf6`（0.6.0 完整重载）、`cf3dd15`（0.6.1 名字防护）、`fcdc7cc`（0.6.2 挂载后自动重载）。
-- **用户规定：每次改完都要提交，不能攒着。** 见 PROJECT_OVERVIEW 的长期约束。
+- **The complete in-place reload works in the game, and the user confirmed seeing the result.** After a new version is published, mesh, materials, textures and anim blueprint are replaced without a return to login, the old objects are all collected, and the older version is unmounted and deleted.
+- **Deployed in the game folder: shell and core 0.7.2**, in `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`, copied on 2026-10-11 with the game closed:
+  - shell `HTReload.asi`, SHA256 `BBE39E1BC28EA920C6BAB4D6ADBA91CD299127AF76AACF726A8214903122309A`
+  - core `HTReload.core.dll`, SHA256 `226C039F75A6028990588A8A9804549C5E1CDE5061EC82B49EDB5D1F415AE61B`
+  - **Neither has run in the game yet.** 0.7.2 differs from 0.7.1 only in the wording of log and report messages, and the stand-in test passed, but the shell binary is new, so the next start of the game is its first run. What to check in the log: `Shell: started`, `Located:`, `Unmount: HandleUnmountPakDelegate`, `Ready:`.
+- Release `v0.7.1` is the latest on GitHub (published 2026-10-10 18:42 at the user's request), pointing at `07d9329`, with `HTReload-0.7.1.zip` (shell `0F2CB234…`, core `6403822D…`, README). `v0.6.2` (`f22f629`) is still there. Nothing newer than 0.7.1 has been released.
+- git: `origin` = `https://github.com/loyal37/HT-Reload`, **public** (seen through `gh` on 2026-10-10; the record before that said private, and the visibility was changed by the user, not by the assistant). Whatever is pushed, `.ai-memory` included, is visible to everyone.
+- Latest code commit: `3716259` (core 0.7.2), followed by the commit that rewrote README and memory.
+- **Rule from the user: commit after every round of changes.** See the standing constraints in PROJECT_OVERVIEW.
+- The mod folder currently holds `blackbird_6_P` only (packaged 2026-10-10 19:12 with the packager's automatic numbering).
 
-## 这次运行（17:19 启动，PID 37696）里做过的写操作，全部成功
+## What was verified in the game on 2026-10-10
 
-1. `renameload 042_blackbird_body_d`：改名返回 1，加载返回一个不同的新对象。没人引用的新副本几秒后被回收，游戏不受影响。
-2. `reload blackbird`（17:34，磁盘上只有 `blackbird_2_P`，内容相同）：改名 25/25、加载 25/25，16 个动态材质换父材质，6 处改写，场上角色重设网格。耗时约 1.3 秒。回收后带 `_HTOLD_` 的包一个不剩。
-3. 用户打包了 `blackbird_4_P`，17:42 自动挂载；`reload blackbird`（17:43）：改名 26/26、加载 26/26，14 个换父材质，6 处改写，重设网格。**用户确认游戏里看到了变化。** 旧包同样全部被回收。
+Core 0.7.1, run started 18:39 (PID 13032): `blackbird_5_P` mounted at 18:41:04, reload done at 18:41:06 (26/26 packages and assets; 16 reparented, 6 rewritten, 1 mesh reset), `blackbird_4_P` unmounted and deleted at 18:41:12. Only `blackbird_5_P` was left in the mod folder afterwards and the game stayed responsive.
 
-## 挂载后自动重载（核心 0.6.2）已在真游戏里走通
+Core 0.7.0, run started 18:22: the unmount handler was found (`HandleUnmountPakDelegate` RVA `0x27b29d0`, size 0x59); `blackbird_5_P` mounted at 18:24:33, reload done at 18:24:35, `blackbird_4_P` unmounted at 18:24:41. That container had been mounted by the engine itself at startup, so the path the plugin passes matches the spelling the engine uses at startup. The user confirmed that the files could then be deleted.
 
-- 17:52（PID 37696 那次运行）：用户放入 `blackbird_5_P`，自动挂载，约 1.7 秒后日志“重载完成，新版本已经生效”，改名 26/26、加载 26/26。
-- 18:10（用户重启游戏后的新运行，PID 9868，18:07 启动）：用户删掉旧版本只留 `blackbird_4_P`，进游戏后又打了一个 `blackbird_5_P`，同样自动重载成功。这次报告里换父材质是 16 个，说明全新进场时身体两个槽是有动态材质的。
-- 两次都是从日志和 `HTReload.reload.txt` 看到的，用户没有专门反馈画面。
+Automatic reload after a mount (core 0.6.2): at 17:52 in the run with PID 37696, and at 18:10 in a new run after the user restarted the game (PID 9868). Both completed in under 2 seconds with 26/26. In the second, 16 dynamic materials were reparented, which shows that on a fresh entry the two body slots do have dynamic materials.
 
-## 已挂载文件的占用情况（2026-10-10 18:1x 实测，游戏运行中）
+Write operations in the run started 17:19 (PID 37696), all successful:
 
-- 用“只申请删除权限、不真删”的方式探测：每个已挂载版本的 `.ucas` 和 `.utoc` 都被游戏锁住，删不掉也改不了名；只有 347 字节的 `.pak` 没被锁。
-- 重载之后不再被使用的旧版本同样锁着，因为容器仍然挂载。
-- 游戏不运行时全部可删。
+1. `renameload 042_blackbird_body_d`: the rename returned 1 and the load returned a different, new object. The unreferenced new copy was collected seconds later; the game was unaffected.
+2. `reload blackbird` at 17:34, with only `blackbird_2_P` on disk (identical content): 25/25 renamed and loaded, 16 dynamic materials reparented, 6 rewrites, the mesh of the character on the field reset. About 1.3 seconds. After collection not one package with `_HTOLD_` was left.
+3. The user packaged `blackbird_4_P`, mounted automatically at 17:42; `reload blackbird` at 17:43: 26/26, 14 reparented, 6 rewrites, mesh reset. **The user confirmed seeing the change in the game.** The old packages were all collected again.
 
-## 重载过程中摸清的游戏行为
+## How mounted files are held (measured 2026-10-10 with the game running)
 
-- 游戏的组件类 `HTSkeletalMeshComponentBudgeted` 在网格被重设时会自己重建材质：
-  - 布料的 14 个槽（cloth ×8、cloth2 ×6）重新创建动态材质，名字 `MID_<父材质名>_<序号>`，同时各配一个同名的、放在 `/Engine/Transient` 下的**描边材质**（父材质是游戏的描边材质，例如 `…/019_mint/ter_new_2/outline/cloth/player_019_mint_cloth`）。主动态材质在 +0x178 指向它的描边材质。
-  - **身体的 2 个槽（body1）重设后放的是新材质本身，没有再包一层动态材质。** 第一次进场时这两个槽是有动态材质的（那是角色初始化时另一趟逻辑建的，重设网格不会再跑这一趟）。用户看过效果说可以，但受击闪白、溶解这类靠动态材质参数驱动的效果在身体部位是否还正常，没有专门验证。
-  - 其余 24 个槽是游戏本体的材质，新旧网格相同，游戏没有动它们。
-  - 所以我先做的“换父材质”对这个 Mod 其实是多余的（那些动态材质随后就被游戏换掉了），但无害；对网格不在包里、只换材质和贴图的 Mod 才是必须的。
-- 组件 +0xdf8 是游戏自己的原生字段（反射里没有），重设网格后短时间内放着新网格指针，随后清空。
-- 动画蓝图实例是网格的后处理动画蓝图实例（组件没有槽位指向那个类）。重设网格后引擎自己用新类建了新实例，旧实例和旧类随后被回收。
-- 名字 ID 的范围（当前到块 444，约 0x1BD0000）和低位堆地址重叠，对象确实会分配在这么低的地址（例如 0x1755b80）。实测撞上过：两个 `WorldPartitionRuntimeLevelStreamingCell` 对象的名字字段（+0x18）数值正好等于 Mod 面板里 `HorizontalBox_33`、`HorizontalBox_36` 的地址。当时因为目标不是顶层资产所以没有写入。0.6.1 加了防护，见 DECISIONS。
+- Probed by asking for delete access without deleting: the `.ucas` and `.utoc` of every mounted version are locked by the game and can be neither deleted nor renamed; only the 347-byte `.pak` is not locked.
+- A version no longer used after a reload is locked just the same while its container is mounted.
+- With the game closed everything can be deleted.
 
-## 已在真游戏里确认的引擎事实（之前各轮）
+## How the game behaves around a reload
 
-- 定位、挂载、垃圾回收请求都正常。垃圾回收入口 RVA `0x4406bd0`。
-- 对象系统：名字池 Blocks RVA `0xfa36e10`；对象表 RVA `0xfb1af80`，条目 0x18 字节；类大小字段偏移 0x58；GEngine 全局 RVA `0xfcc6d90`。对象表要等窗口出现后才存在。
-- `UObject::Rename` = RVA `0x181e3b0`，虚表第 46 项（偏移 0x170）。包类的重写 RVA `0x1845670` 只是转调。
-- `UObject::ProcessEvent` = RVA `0x18aacd0`，虚表第 76 项（偏移 0x260）。
-- `UFunction`：`FunctionFlags` 0xB0，`NumParms` 0xB4，`ParmsSize` 0xB6，`ReturnValueOffset` 0xB8，`Func` 0xD8，大小 0xE0。
-- `FField`：类 0x08（`FFieldClass` 开头就是名字），`Next` 0x18，名字 0x20。`FProperty`：`ArrayDim` 0x30，`ElementSize` 0x34，`PropertyFlags` 0x38，`Offset_Internal` 0x44。
-- 脚本函数：
-  - `KismetSystemLibrary.LoadAsset_Blocking`：参数块 0x30，返回值偏移 0x28。
-  - `SkeletalMeshComponent.SetSkeletalMeshAsset`：参数块 8。
-  - `MaterialInstanceDynamic.CopyParameterOverrides(UMaterialInstance*)`：参数块 8。
-  - `KismetSystemLibrary.GetFrameCount`：参数块 8（试调用用）。
-  - `EmptyOverrideMaterials` 不是脚本函数。`HTPlayerCharacter.ResetCharacterMesh(bool)` 只重置网格的相对变换，没用。
-- 反射属性偏移：`SkinnedMeshComponent.SkeletalMesh` +0x5b0、`SkinnedAsset` +0x5b8；`MeshComponent.OverrideMaterials` +0x548（黑鸟有 40 项）；`MaterialInstance.Parent` +0x128；`HTPlayerAppearance.FashionMeshData` +0x80；`HTPlayerCharacter.CurMeshData` +0x2950、`CurPlayerAppearance` +0x2960；`Character.Mesh` +0x348。
-- 黑鸟不出场时角色对象照样活在关卡里，所以队伍内切换从来不会刷新资产。
-- 返回登录界面再进入可以完全刷新（老办法，重载失败时的退路）。
+- The game's component class `HTSkeletalMeshComponentBudgeted` rebuilds materials itself when its mesh is reset:
+  - The 14 cloth slots (cloth ×8, cloth2 ×6) get new dynamic materials named `MID_<parent material>_<number>`, each with an **outline material** of the same name under `/Engine/Transient` (its parent is one of the game's outline materials, for example `…/019_mint/ter_new_2/outline/cloth/player_019_mint_cloth`). The main dynamic material points at its outline material at +0x178.
+  - **The 2 body slots (body1) hold the new material itself after the reset, with no dynamic material around it.** On a fresh entry they do have dynamic materials (created by another pass when the character is initialised, which a mesh reset does not repeat). The user looked at the result and found it fine, but effects driven by dynamic material parameters, such as hit flash and dissolve, were not checked on the body.
+  - The other 24 slots are the game's own materials, the same in the old and new mesh; the game leaves them alone.
+  - So the reparenting done first is in fact redundant for this mod (those dynamic materials are replaced by the game right after) but harmless; it is what a mod without its own mesh needs.
+- The component's +0xdf8 is a native field of the game (not in reflection). It holds the new mesh pointer for a short time after a mesh reset and is then cleared.
+- The anim blueprint instance is the mesh's post-process anim blueprint instance (no slot of the component points at that class). After a mesh reset the engine creates a new instance from the new class by itself; the old instance and class are then collected.
+- The range of name ids (up to block 444 at the time, about 0x1BD0000) overlaps low heap addresses, and objects really are allocated that low (0x1755b80, for example). It happened in testing: the name fields (+0x18) of two `WorldPartitionRuntimeLevelStreamingCell` objects equalled the addresses of `HorizontalBox_33` and `HorizontalBox_36` in the mod's panel. Nothing was written then, because the targets were not top-level assets. Core 0.6.1 added the guard; see DECISIONS.
+- The mod's toggle logic lives in the anim blueprint; the save class restores its state and the panel only displays and forwards (from the project memory of `D:\ueproject\HT`).
 
-## 打包器的自动编号（2026-10-10，打包器 2.6）
+## Engine facts confirmed in the game
 
-- 打包器在另一个仓库：`D:\Neverness to Everness Mod Loader\cook\packager`（WPF，.NET 8，`build.ps1` 生成根目录的 `NTE-Mod-Packager.exe`，这个 exe 是入库的）。
-- 新增“自动编号”勾选框，默认关闭、记住状态。用户的设置里已经替他勾上（`%LOCALAPPDATA%\NTE Mod Packager\settings.json` 的 `AutoNumber: true`）。
-- 规则（`src/NteModPackager/Services/OutputNaming.cs`）：名称照常输入；输出名是“输出目录里同一个模组已有的最大编号 + 1”，名称里自己写的编号只当起点。`blackbird_5_P` 在已有 5 时输出 `blackbird_6_P`；`blackbird_P` 从 1 开始。不以 `_P` 结尾的不编号。名字在生成容器之前就定好。
-- 验证：`dotnet run --project tests/NteModPackager.Smoke -- naming` 通过；用界面自动化在临时输出目录做了一次真实打包，已有 5 时生成了 `blackbird_6_P` 三件套，打包后预览变成 7。**没有往游戏目录打过包**，和 HT Reload 连起来的第一次由用户来做。
-- 本地提交 `de16cb0`，没有推送（推送会更新公开仓库里的 exe，用户没要求）。
+- Locating, mounting and collection requests all work. Collection entry RVA `0x4406bd0`.
+- Object system: name pool Blocks RVA `0xfa36e10`; object table RVA `0xfb1af80`, 0x18-byte items; class size field at offset 0x58; GEngine global RVA `0xfcc6d90`. The object table only exists once the window has appeared.
+- `UObject::Rename` = RVA `0x181e3b0`, vtable slot 46 (offset 0x170). The package class's override at RVA `0x1845670` only forwards to it.
+- `UObject::ProcessEvent` = RVA `0x18aacd0`, vtable slot 76 (offset 0x260).
+- `UFunction`: `FunctionFlags` 0xB0, `NumParms` 0xB4, `ParmsSize` 0xB6, `ReturnValueOffset` 0xB8, `Func` 0xD8, size 0xE0.
+- `FField`: class 0x08 (an `FFieldClass` starts with its name), `Next` 0x18, name 0x20. `FProperty`: `ArrayDim` 0x30, `ElementSize` 0x34, `PropertyFlags` 0x38, `Offset_Internal` 0x44.
+- Script functions:
+  - `KismetSystemLibrary.LoadAsset_Blocking`: parameter block 0x30, return value at 0x28.
+  - `SkeletalMeshComponent.SetSkeletalMeshAsset`: parameter block 8.
+  - `MaterialInstanceDynamic.CopyParameterOverrides(UMaterialInstance*)`: parameter block 8.
+  - `KismetSystemLibrary.GetFrameCount`: parameter block 8 (used by the call test).
+  - `EmptyOverrideMaterials` is not a script function. `HTPlayerCharacter.ResetCharacterMesh(bool)` only resets the mesh's relative transform and is of no use here.
+- Reflected property offsets: `SkinnedMeshComponent.SkeletalMesh` +0x5b0, `SkinnedAsset` +0x5b8; `MeshComponent.OverrideMaterials` +0x548 (40 entries for Blackbird); `MaterialInstance.Parent` +0x128; `HTPlayerAppearance.FashionMeshData` +0x80; `HTPlayerCharacter.CurMeshData` +0x2950, `CurPlayerAppearance` +0x2960; `Character.Mesh` +0x348.
+- A character's object stays alive in the level while the character is off the field, which is why switching within the party never refreshes assets.
+- Returning to the login screen and entering again refreshes everything (the older way, and the fallback when a reload does not complete).
+
+## The packager's automatic numbering (2026-10-10, packager 2.6)
+
+- The packager is a separate repository: `D:\Neverness to Everness Mod Loader\cook\packager` (WPF, .NET 8; `build.ps1` produces `NTE-Mod-Packager.exe` in the repository root, and that exe is tracked).
+- A checkbox for automatic numbering was added, off by default and remembered. It was switched on in the user's own settings (`AutoNumber: true` in `%LOCALAPPDATA%\NTE Mod Packager\settings.json`).
+- Rule (`src/NteModPackager/Services/OutputNaming.cs`): the name is typed as before; the output name is one more than the highest number the output directory holds for the same mod, and a number typed into the name is only a starting point. `blackbird_5_P` gives `blackbird_6_P` when 5 exists; `blackbird_P` starts at 1. A name not ending in `_P` is not numbered. The name is settled before the container is generated.
+- Verified with `dotnet run --project tests/NteModPackager.Smoke -- naming` and with one real build driven through UI automation into a scratch output directory. The user has since packaged `blackbird_6_P` into the game folder with it.
+- Local commit `de16cb0`, not pushed (a push would update the exe in the public repository, which the user has not asked for).
 
 ## Next step
 
-1. 目前没有在等的验证。主流程（挂载、重载、卸载、删除）都已在真游戏里走通。
-2. 用户若发现身体部位的特效不对，再处理 body1 两个槽没有动态材质的问题（可以在重设网格后调 `PrimitiveComponent.CreateDynamicMaterialInstance` 补上，但要先弄清游戏自己的容器认不认）。
-3. 打包器的自动编号还没做，用户一直没答复。现在每次打包要手动换一个更大的编号。
+1. On the next start of the game, read the log to confirm that shell and core 0.7.2 come up as before.
+2. Tighten the verdict of a reload (see TASKS) once the user says who is to do it.
+3. If the user finds effects wrong on the body, deal with the two body1 slots that have no dynamic material (`PrimitiveComponent.CreateDynamicMaterialInstance` after the mesh reset could add them, once it is clear whether the game's own bookkeeping accepts them).
 
-用 `tools\ask.ps1` 发指令，用 `tools\disasm.ps1` 反汇编 `code` 指令取回的字节。
+Commands are sent with `tools\ask.ps1`; `tools\disasm.ps1` disassembles the bytes that the `code` command returns.

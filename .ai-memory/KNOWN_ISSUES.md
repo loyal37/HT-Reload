@@ -1,112 +1,117 @@
 # Known Issues
 
-## 重载后身体的两个材质槽没有动态材质
+## A reload reports success even when it only partly took effect
 
-- 现象：黑鸟的 `CharacterMesh0` 有 40 个覆盖材质槽。重载前每个槽都是动态材质；重载后第 13、14 槽（`MI_mint_042_blackbird_body1`）放的是新材质本身。
-- 原因：游戏的组件在网格被重设时只给布料的 14 个槽重建动态材质和描边材质；给所有槽建动态材质的那趟逻辑只在角色初始化时跑。
-- 影响：用户看过效果说可以。靠动态材质参数驱动的效果（受击闪白、溶解之类）在身体部位是否还正常没有专门验证。返回登录界面再进入会恢复成全是动态材质。
-- 可改进：重设网格后对这类槽调 `PrimitiveComponent.CreateDynamicMaterialInstance`。要先弄清游戏自己记录动态材质的容器会不会认新建的。
+- Symptom: `Reloader::Reload` returns `Done` whenever no step was aborted. An asset that produced no new object, or a slot that was not replaced (no new asset for its target, or marked doubtful), is listed in the report but does not change the result, so the high tone and "the new version is live" can follow a partial reload.
+- Impact: only the verdict. Unmounting and deleting an old version is gated separately on every renamed package having been collected, so a reference that was left behind keeps the old version in place.
+- So far every reload in the game was complete (26/26 packages and assets, every slot replaced).
+- To do: a third result for "partly done", reported as such, and a final line after the collection window saying whether every old object went away.
 
-## 换父材质会清掉动态材质上游戏设的参数
+## Two body material slots have no dynamic material after a reload
 
-- 现象：`CopyParameterOverrides` 先清空动态材质自己的参数，再拷入新父材质的参数。游戏运行时设在上面的参数会丢，直到游戏下一次再设。
-- 影响：对黑鸟这个 Mod 没有实际影响，因为那些动态材质随后就被游戏在重设网格时换掉了。对网格不在包里的 Mod 可能有短暂的视觉差异。
-- 原因：这是唯一找到的、能从脚本函数触发 `InitResources()` 把新父材质推给渲染线程的途径。
+- Symptom: Blackbird's `CharacterMesh0` has 40 override material slots. Before a reload each holds a dynamic material; afterwards slots 13 and 14 (`MI_mint_042_blackbird_body1`) hold the new material itself.
+- Cause: when its mesh is reset, the game's component only rebuilds the dynamic and outline materials of the 14 cloth slots; the pass that gives every slot a dynamic material only runs when the character is initialised.
+- Impact: the user looked at the result and found it fine. Whether effects driven by dynamic material parameters (hit flash, dissolve and the like) still work on the body was not checked. Returning to the login screen and entering again restores dynamic materials everywhere.
+- Possible fix: call `PrimitiveComponent.CreateDynamicMaterialInstance` for such slots after the mesh reset. Whether the game's own bookkeeping of dynamic materials would accept the new ones has to be found out first.
 
-## 不在对象体内的引用不会被改写
+## Reparenting clears the parameters the game set on a dynamic material
 
-- 现象：重载只改写其他对象体内的指针槽。`TArray`、`TMap` 的堆存储里指向旧资产的指针不动。
-- 影响：黑鸟这个 Mod 没问题（两次重载后旧对象全部被回收，说明没有漏掉的强引用）。只换材质或贴图、网格用游戏本体的 Mod 会漏：网格的材质数组在堆上，旧材质会继续被使用。
-- 可改进：用反射遍历容器属性。
+- Symptom: `CopyParameterOverrides` empties the dynamic material's own parameters before copying those of the new parent. Parameters the game set at run time are lost until it sets them again.
+- Impact: none in practice for the Blackbird mod, because the game replaces those dynamic materials when the mesh is reset. A mod without its own mesh may show a brief visual difference.
+- Cause: this is the only way found to trigger `InitResources()` from a script function and so push the new parent to the render thread.
 
-## 槽位是按数值找的，可能把别的数据认成指针
+## References outside object bodies are not rewritten
 
-- 现象：实测两个世界分区单元对象的名字字段数值正好等于 Mod 里两个对象的地址。名字 ID 的取值范围和低位堆地址重叠。
-- 状态：核心 0.6.1 起，对象头里除类指针外的字不算槽位；旧对象地址同时是名字编号时，只认类里声明过的对象属性，否则标“存疑”不改。
-- 剩余风险：其他类型的数据（整数、哈希）恰好等于一个对象地址的可能性极小但不为零；嵌在结构体里的对象属性在“存疑”情形下不会被认出来，会留着旧指针。
+- Symptom: a reload only rewrites pointer slots inside the bodies of other objects. Pointers to old assets in the heap storage of a `TArray` or `TMap` are left.
+- Impact: none for the Blackbird mod (after each reload all old objects were collected, so no strong reference was missed). A mod that only replaces materials or textures and uses a mesh of the game is affected: the mesh's material array is on the heap, and the old materials stay in use.
+- Possible fix: walk container properties through reflection.
 
-## 旧类的实例不会被换掉
+## Slots are found by value, so other data can be taken for a pointer
 
-- 现象：重载只换资产。动画蓝图实例靠重设网格由引擎重建；面板（`WBP_NTEPanel_C`）、存档类（`Blackbird_1_save_C`）如果当时有实例活着，实例仍是旧类的，旧类也因此不会被回收。
-- 影响：两次实测时这些类都没有活着的实例。面板开着的时候重载会怎样没有试过。
+- Symptom: in testing, the name fields of two world partition cell objects happened to equal the addresses of two objects of the mod. The range of name ids overlaps low heap addresses.
+- Status: since core 0.6.1 the words of an object's header other than the class pointer are not slots; and where an old object's address is also a name id, only an object property declared by the class counts, anything else is marked doubtful and left.
+- Remaining risk: other kinds of data (integers, hashes) equal to an object's address are extremely unlikely but not impossible; an object property nested in a struct is not recognised in the doubtful case and keeps the old pointer.
 
-## 返回登录界面是退路
+## Instances of old classes are not replaced
 
-- 2026-10-10 早先确认：队伍内切换、换出队伍、换皮肤、传送都不刷新资产，因为角色对象不出场也活在关卡里；返回登录界面再进入可以完全刷新。
-- 现在有了原地重载，这条只在重载没完成时用。日志会提示。
+- Symptom: a reload replaces assets. Anim blueprint instances are rebuilt by the engine when the mesh is reset; an instance of the panel (`WBP_NTEPanel_C`) or of the save class (`Blackbird_1_save_C`) that is alive at that moment stays an instance of the old class, which also keeps the old class from being collected and the old version from being unmounted.
+- Impact: in the reloads so far none of these classes had a live instance. A reload with the panel open has not been tried, and neither has a reload after a blueprint change such as an added toggle.
 
-## 探测里“可能的持有者”一节噪声很大
+## Returning to the login screen is the fallback
 
-- 现象：真游戏第一次探测，直接引用者只有 25 处、很干净；“对象外的指针”有 1950 处，第二遍推出的“可能的持有者”有 473 处，里面混着大量明显无关的类（音频事件、Niagara 脚本、载具等）。
-- 原因：第二遍只是按“指向槽位之前 0x800 字节内某地址”来猜，同一片堆里相邻的无关内存块也会被算进去。
-- 影响：直接引用者可信；间接持有者只能当线索，不能直接当结论，更不能据此改写内存。
-- 可改进：用引擎反射（属性链）精确遍历容器，而不是按地址猜。
+- Established earlier on 2026-10-10: switching within the party, leaving the party, changing the skin and teleporting do not refresh assets, because a character's objects stay alive in the level while it is off the field; returning to the login screen and entering again refreshes everything.
+- With the in-place reload this is only needed when a reload did not complete. The log says so.
 
-## 我曾把类大小字段的偏移记错
+## The "possible owners" section of the probe is noisy
 
-- 2026-10-10 看 v0.3.2 的现场数据时数错了分组，以为游戏里 `PropertiesSize` 在 0x60。v0.3.3 实测是 0x58，与原版相同；真正的差异只是后面的对齐值是 16 位。记忆文件和代码注释已更正。告诉过用户“位置比原版靠后 8 字节”，这句是错的。
-- 动作比之前大：探测会读取引擎堆的大部分内存，每次探测读两遍。之前的版本只读主模块和个别堆指针。反作弊的反应同样无法判断。
-- 间接持有者是推断：第二遍用“指向槽位之前 0x800 字节内某地址”来猜堆块的主人，可能有误报，距离越小越可信。
+- Symptom: in the first probe in the game the direct referrers were only 25 and clean; there were 1950 "pointers outside objects", and the second pass derived 473 "possible owners", among them many plainly unrelated classes (audio events, Niagara scripts, vehicles and so on).
+- Cause: the second pass only guesses, by "points at an address within 0x800 bytes before the slot", and unrelated blocks next to it in the same heap are counted too.
+- Impact: direct referrers can be trusted; indirect owners are leads, not conclusions, and never a basis for writing to memory.
+- Possible fix: walk containers exactly through the engine's reflection instead of guessing by address.
 
-## 垃圾回收窗口只有 120 秒
+## The offset of the class size field was once recorded wrongly
 
-- 现象：回收请求只在每次挂载成功后的 120 秒内进行。过了这段时间再做游戏内操作，就只能等引擎自己的周期回收。
-- 规避：再发布一个新版本会重新开始计时。
-- 可改进：延长窗口，或窗口结束后改为低频请求。
-- 更正（2026-10-10）：之前这里写“给内存里的包改名绕不过去”，是错的。加载器发现已加载的包被改了名就会丢掉旧记录重新读盘，原地重载正是靠这个，已在真游戏里验证。
+- On 2026-10-10, reading the data v0.3.2 had logged, the assistant miscounted a group and took `PropertiesSize` to be at 0x60 in the game. v0.3.3 measured 0x58, as in the stock engine; the only real difference is that the alignment value after it is 16 bits wide. Memory files and the code comment were corrected. The user had been told the field sits 8 bytes later than in the stock engine, which was wrong.
 
-## 探测窗口会越过小的堆块
+## The probe reads a large part of the engine's heap
 
-- 现象：定位时对每个堆指针读 12 个机器字。委托实例只有 0x30 字节左右，窗口会读进相邻的分配。v0.1.0 第二次运行时因此把同一个实例数成了“2 处绑定”（全局 `0xfa2a710` 偏移 0x20 和全局 `0xfa2a730` 偏移 0x50 指向同一地址）。
-- 影响：函数和对象相同，结果正确，只是多一行误导性的警告。
-- 状态：v0.2.0 已按“函数+对象”去重。
+- A probe reads most of the engine's heap memory, twice. Earlier versions read only the image and a few heap pointers. How the anti-cheat reacts cannot be judged for this either.
 
-## 重载在游戏线程上阻塞加载
+## Collection requests only run for a window after a mount
 
-- 现象：改名、加载、替换在游戏线程的一个任务里做完，期间游戏卡住。黑鸟 26 个包实测约 1.3 秒。
-- 风险：如果恰好在游戏自己的加载或切场景过程中触发，后果没有试过。自动重载不挑时机。
+- Symptom: collections are requested for 20 seconds after a completed reload and 120 seconds otherwise. In-game actions after that depend on the engine's own periodic collection.
+- Workaround: publishing another version starts the window again; the command `gc [seconds]` opens one by hand.
+- Correction (2026-10-10): this entry used to say that renaming a package in memory does not get around the loader's record of loaded packages. That was wrong. The loader drops the record of a loaded package once it has been renamed and reads from disk again; the in-place reload rests on exactly that and is verified in the game.
 
-## 游戏运行时同名打包会失败
+## The locating window reads past small heap blocks
 
-- 现象：打包器发布时先把旧三件套改名再换入新文件。旧文件被游戏占用，改名失败，整个构建在最后一步报错回滚。
-- 规避：游戏开着时换新名字。
-- 2026-10-10 起打包器 2.6 有“自动编号”选项，勾上后每次自动用下一个编号，不再需要手动改名。
+- Symptom: locating reads 12 machine words behind every heap pointer. A delegate instance is only about 0x30 bytes, so the window runs into the neighbouring allocation. In the second run of v0.1.0 one instance was therefore counted as two bindings (global `0xfa2a710` at offset 0x20 and global `0xfa2a730` at offset 0x50 led to the same address).
+- Impact: function and object were the same, so the result was right; there was just one misleading warning.
+- Status: since v0.2.0 bindings are deduplicated by function and object.
 
-## 旧版本累积
+## A reload blocks the game thread while it loads
 
-- 现象：每次热发布留下一整份三件套，旧容器保持挂载到游戏退出。
-- 实测（2026-10-10）：游戏运行时每个已挂载版本的 `.ucas`、`.utoc` 都被锁住，删不掉；`.pak` 没锁但单删它没有意义。重载后不再使用的旧版本也一样锁着。
-- 核心 0.7.0 起：重载后会卸载被新版本完全取代的旧容器，文件随之放开。真游戏里已验证。
-- 核心 0.7.1 起：卸载后直接删除旧三件套，永久删除，不进回收站。想留的旧版本要事先另存。真游戏里已验证（2026-10-10 18:41）。
-- 仍然留着的情况：启动时就同时挂着的多个版本（要等下一次重载）；重载没完成；有旧资产没被回收；旧版本里有新版本没有的包。
-- 被卸载过的名字在同一次运行里不会再被挂载（监视器按名字记“已处理”）。要重新发布就用新的编号。
-- 影响：占磁盘和文件句柄。下次启动引擎会把所有版本都挂上，按版本号取最新，结果正确但浪费。
-- 规避：退出游戏后手动删旧版本。
+- Symptom: rename, load and replace run in one task on the game thread, and the game stands still meanwhile. About 1.3 seconds for Blackbird's 26 packages.
+- Risk: what happens if it is triggered during the game's own loading or a scene change has not been tried. The automatic reload does not pick its moment.
 
-## 名字不以 `_P` 结尾的包优先级不够
+## Packaging under the same name fails while the game runs
 
-- 现象：没有 `_P` 后缀时顺序和游戏本体的包相同，不保证能覆盖本体资产。
-- 当前行为：照常挂载，日志给出提示。
+- Symptom: on publishing, the packager first renames the old three files and then moves the new ones in. The old files are held by the game, the rename fails, and the whole build reports an error at the last step and rolls back.
+- Workaround: use a new name while the game is open.
+- Since 2026-10-10 the packager (2.6) has an "automatic numbering" option; with it on, every build uses the next number and no manual renaming is needed.
 
-## 挂载调用出异常后本次运行停用
+## Old versions
 
-- 现象：调用包在 SEH 里。若抛出异常，记录异常码、响一声长低音，之后不再挂载。
-- 影响：引擎状态此时不可信（可能还持有锁），应重启游戏。
+- Measured on 2026-10-10: while the game runs, the `.ucas` and `.utoc` of every mounted version are locked and cannot be deleted; the `.pak` is not locked, but deleting it alone is pointless. A version that is no longer used after a reload is locked just the same.
+- Since core 0.7.0 old containers that a new version fully supersedes are unmounted after a reload, which lets go of the files. Verified in the game.
+- Since core 0.7.1 the three files are deleted right after the unmount, permanently and not to the recycle bin. An old version worth keeping has to be copied elsewhere beforehand. Verified in the game (2026-10-10 18:41).
+- What still stays behind: several versions that were all on disk at startup (until the next reload); a reload that did not complete; old assets that were not collected; an old version holding a package the new one lacks.
+- A name that has been unmounted is not mounted again in the same run (the watcher records names as handled). Publish again under a new number.
 
-## 反作弊反应未知
+## A pak whose name does not end in `_P` has too little priority
 
-- 现象：游戏带 `AntiCheatExpert`。插件会读取主模块内存、装线程消息钩子、调用引擎函数。
-- 已知：同目录的 SigBypasser 和 Anticensor 也在做运行时内存扫描和修改，一直在用。
-- 未知：主动调用引擎函数是否会被额外关注，无法判断。
-- 建议：只用于自己开发，用小号。
+- Symptom: without the `_P` suffix the order is the same as that of the game's own paks, so overriding the game's assets is not guaranteed.
+- Behaviour: it is mounted as usual and the log has a note.
 
-## 日志文件被占用
+## An exception in the mount call disables mounting for the run
 
-- 现象：插件一直持有 `HTReload.log` 的写句柄（允许他人读和删除）。
-- 影响：记事本能打开；用默认共享方式打开的程序（如 PowerShell 的 `Select-String`、`Get-Content`）在游戏运行时会失败。
-- 规避：用允许写共享的方式读，参考 `test\run.ps1` 的 `Read-Log`。
+- Symptom: the call is wrapped in SEH. If an exception is raised, its code is logged, one long low tone sounds, and nothing more is mounted.
+- Impact: the engine's state cannot be trusted at that point (it may still hold a lock); the game should be restarted.
 
-## 构建输出里有一行 vswhere 提示
+## The anti-cheat's reaction is unknown
 
-- 现象：`vcvars64.bat` 自己找不到 `vswhere.exe` 时会打印一行提示。
-- 当前做法：`build.ps1` 把 `vcvars64.bat` 的输出全部丢弃，不影响构建。
+- The game has `AntiCheatExpert`. The plugin reads memory of the game, installs a thread message hook, calls engine functions and writes pointers in engine objects.
+- Known: SigBypasser and Anticensor in the same folder scan and modify memory at run time as well and have been in use all along.
+- Unknown: whether calling engine functions draws extra attention. It cannot be judged.
+- Advice: development use only, on a secondary account.
+
+## The log file is held open
+
+- Symptom: the plugin keeps a write handle on `HTReload.log` (others may read and delete).
+- Impact: Notepad opens it; programs that open with default sharing (PowerShell's `Select-String` and `Get-Content`, for example) fail while the game runs.
+- Workaround: read it with write sharing allowed; see `Read-Shared` in `test\run.ps1`.
+
+## One line about vswhere in the build output
+
+- Symptom: `vcvars64.bat` prints a line when it cannot find `vswhere.exe` by itself.
+- Handling: `build.ps1` discards all output of `vcvars64.bat`; the build is not affected.

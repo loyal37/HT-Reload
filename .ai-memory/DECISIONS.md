@@ -1,185 +1,185 @@
 # Decisions
 
-## 2026-10-10 - 在插件里自己实现“重新加载包并修正引用”
+## 2026-10-10 - Implement "reload the packages and fix up the references" in the plugin
 
-- 决策内容：用户明确要求做原地完全重载。既然引擎自带的 `ReloadPackages` 被裁掉，就在插件里自己搭这套流程：旧包改名、加载新版本、替换引用、回收。
-- 决策原因：两次探测证明角色不出场时对象照样活着，任何切换都不会让游戏放手；而加载器的“改名后重载”逻辑还在，原理上走得通。
-- 已知代价：从只读变成改写游戏里活着的对象，开发期间游戏崩溃的可能性大，反作弊方面的暴露更高。已告知用户。
-- 其他方案：只保留“返回登录再进入”。
-- 未选择原因：用户要的是不返回登录的完全重载。
-- 影响模块：核心里将新增的重载模块；`explore.cpp` 是为找入口服务的。
+- Decision: the user asked explicitly for a complete in-place reload. Since the engine's own `ReloadPackages` is stripped from the game, the plugin builds the procedure itself: rename the old packages, load the new version, replace references, collect.
+- Reason: two probes showed that a character's objects stay alive while the character is off the field, so no kind of switching makes the game let go; and the loader's handling of renamed packages is still there, so the approach works in principle.
+- Known cost: the plugin goes from reading to rewriting live objects of the game. Crashes during development become likely and the exposure to the anti-cheat grows. The user was told.
+- Alternative: keep only "return to the login screen and enter again".
+- Why not: the user wants a complete reload without returning to login.
+- Affected: the reload module in the core; `explore.cpp` serves the search for entry points.
 
-## 2026-10-10 - 拆成常驻外壳和可更换的核心
+## 2026-10-10 - Split into a resident shell and a replaceable core
 
-- 决策内容：`HTReload.asi` 只保留日志、游戏线程钩子和核心加载器；其余全部放进 `HTReload.core.dll`，外壳发现文件变化就换上新的。
-- 决策原因：为探测已经让用户重启了四次游戏。后面要攻的入口多，每改一版都重启不现实。
-- 关键设计：钩子函数放在外壳里；外壳用读写锁保证卸载核心时没有核心代码在游戏线程上运行；加载的是核心的副本，原文件随时可覆盖。
-- 其他方案：继续单个 ASI。
-- 影响模块：`shell/shell.cpp`、`src/host.h`、`src/main.cpp`、`src/game_thread.cpp`、`src/log.cpp`、`build.ps1`、`deploy.ps1`。
+- Decision: `HTReload.asi` keeps only the log, the game thread hook and the core loader; everything else moves into `HTReload.core.dll`, which the shell replaces when the file changes.
+- Reason: the probing had already cost the user four restarts of the game. With many entry points still to work out, a restart per build was not workable.
+- Key points: the hook procedure lives in the shell; a reader-writer lock in the shell guarantees that no core code runs on the game thread while the core is unloaded; a copy of the core is loaded, so the original can be overwritten at any time.
+- Alternative: stay with a single ASI.
+- Affected: `shell/shell.cpp`, `src/host.h`, `src/main.cpp`, `src/game_thread.cpp`, `src/log.cpp`, `build.ps1`, `deploy.ps1`.
 
-## 2026-10-10 - 用指令文件做交互式查看，探测不再自动触发
+## 2026-10-10 - A command file for interactive inspection; probes are no longer automatic
 
-- 决策内容：核心每秒检查 `HTReload.cmd.txt`；探测和一组只读查看指令都由它触发，答案写文件。去掉挂载后的自动探测和三声提示。
-- 决策原因：让用户打包、等提示音来触发探测太慢，还出过白等的事。指令文件让我能在游戏运行时自己反复查。
-- 影响模块：`main.cpp` 的 `Watcher::RunCommands`、`explore.cpp`。
+- Decision: the core checks `HTReload.cmd.txt` once a second; the probe and a set of read-only inspection commands are triggered through it and answer into a file. The automatic probe after a mount and its three beeps were removed.
+- Reason: having the user package and wait for a sound to trigger a probe was slow and once had them wait for nothing. With the command file the assistant can look repeatedly while the game runs.
+- Affected: `Watcher::RunCommands` in `main.cpp`, `explore.cpp`.
 
-## 2026-10-10 - 目标是全部资产完全重载，不走只刷新贴图的路
+## 2026-10-10 - The goal is a complete reload of all assets, not a texture-only refresh
 
-- 决策内容：用户明确，目标是 pak 资产完全重载，不能只局限于贴图。“靠重新流送即时刷新贴图”的设想搁置。
-- 决策原因：用户要求。
-- 影响：后续工作围绕“让游戏放开旧资产并重新加载”展开，而不是针对某一类资产取巧。
+- Decision: the user made clear that the goal is a complete reload of pak assets, not limited to textures. The idea of refreshing textures instantly through re-streaming is shelved.
+- Reason: the user's requirement.
+- Effect: the work is about making the game let go of old assets and load them again, not about shortcuts for one kind of asset.
 
-## 2026-10-10 - 先做只读探测，弄清谁持有旧资产
+## 2026-10-10 - Probe read-only first, to learn who holds the old assets
 
-- 决策内容：v0.3.0 读取引擎的对象表和名字池，在每次挂载后报告旧对象是否存活、被谁引用。先拿到事实再设计重载机制。
-- 决策原因：队伍切换、换出队伍、换皮肤、传送在主动回收正常的情况下全都不刷新，只有返回登录有效。从外面无法判断是谁占着旧资产。
-- 已知的硬限制：UE 5 的 Zen 加载器按包 ID 记录已加载的包，旧包对象不被回收就不会重新读盘。所以必须让旧资产真正失去引用，绕不过去。
-- 其他方案：继续让用户试各种游戏内操作；直接上 UE4SS 之类的现成工具。
-- 未选择原因：前者已经试遍；后者在加壳加反作弊的自定义引擎上未必能用，而且是反作弊重点识别的对象。
-- 影响模块：`objects.cpp`、`probe.cpp`、`cityhash.cpp`、`arena.cpp`。
+- Decision: v0.3.0 reads the engine's object table and name pool and reports, after each mount, whether the old objects are alive and who references them. Facts first, then the design of the reload.
+- Reason: switching within the party, leaving the party, changing the skin and teleporting all failed to refresh anything although active collection worked; only returning to login did. From the outside it could not be told who held the old assets.
+- Alternatives: have the user try more in-game actions; use an existing tool such as UE4SS.
+- Why not: the first was exhausted; the second may not work on a packed, custom engine with anti-cheat and is exactly what anti-cheat looks for.
+- Affected: `objects.cpp`, `probe.cpp`, `cityhash.cpp`, `arena.cpp`.
 
-## 2026-10-10 - 探测只读能归到引擎头上的内存
+## 2026-10-10 - The probe reads only memory that can be attributed to the engine
 
-- 决策内容：引用扫描的范围限定为主模块可写数据，加上“至少放着一个引擎对象”的内存分配。其余内存（其他 DLL 的堆、驱动和反作弊的内存等）不读。
-- 决策原因：整进程扫描动作太大，可能碰到不该碰的内存；而引擎的小块堆基本都和对象在同一批分配里。
-- 代价：只放在大块独立分配里、且那块分配里没有任何对象的容器会漏掉。如果探测显示旧对象活着却找不到任何引用者，再考虑放宽。
-- 影响模块：`probe.cpp` 的 `EngineMemory`。
+- Decision: the reference scan covers the image's writable data plus the memory allocations that hold at least one engine object. Other memory (heaps of other DLLs, memory of drivers and of the anti-cheat, and so on) is not read.
+- Reason: scanning the whole process is a large action and may touch memory that should be left alone; and the engine's small heap blocks mostly share allocations with objects.
+- Cost: a container whose storage sits in a large allocation of its own, with no object in it, is missed. Should a probe show old objects alive without any referrer, widening is to be reconsidered.
+- Affected: `EngineMemory` in `probe.cpp`.
 
-## 2026-10-10 - 暂不使用桥接，打包端改动落在打包器
+## 2026-10-10 - No bridge for now; packaging changes go into the packager
 
-- 决策内容：用户明确表示暂时不用 NTE Bridge，仍用 `NTE-Mod-Packager` 打包。以后的自动编号、清理旧版本都改打包器。
-- 决策原因：用户当前的实际流程就是打包器直接输出到游戏的 `Paks\MOD\<Mod 名>`。
-- 其他方案：改桥接的发布步骤。
-- 未选择原因：用户暂时不用桥接。
-- 影响模块：`D:\Neverness to Everness Mod Loader\cook\packager` 的 `BuildService.PublishWithRollbackAsync`、主窗口的覆盖确认。本项目代码不受影响。
+- Decision: the user said NTE Bridge is not used for now and packaging stays with `NTE-Mod-Packager`. Automatic numbering and cleanup of old versions are packager changes.
+- Reason: the user's actual workflow is the packager publishing straight into the game's `Paks\MOD\<mod name>`.
+- Alternative: change the bridge's publish step.
+- Why not: the user does not use the bridge at present.
+- Affected: `BuildService.PublishWithRollbackAsync` and the overwrite prompt of the main window in `D:\Neverness to Everness Mod Loader\cook\packager`. No code of this project.
 
-## 2026-10-10 - 验证阶段不改打包器，手动换名
+## 2026-10-10 - Leave the packager alone during validation; rename by hand
 
-- 决策内容：首轮验证只靠 ASI。用户在打包器名称框里手动填 `name_1_P`、`name_2_P`。
-- 决策原因：打包器现有逻辑对新名字能正常发布；先确认热重载可行再投入改打包器。
-- 其他方案：先改打包器再验证。
-- 未选择原因：最大的未知数在游戏是否释放旧资产，和打包器无关。
-- 影响模块：无。
+- Decision: the first validation relies on the ASI alone. The user types `name_1_P`, `name_2_P` into the packager's name field.
+- Reason: the packager publishes a new name without trouble as it is; hot reload had to be shown to work before investing in the packager.
+- Alternative: change the packager first.
+- Why not: the big unknown was whether the game releases old assets, which has nothing to do with the packager.
+- Affected: nothing.
 
-## 2026-10-10 - 换名挂载，不卸载、不覆盖
+## 2026-10-10 - Mount under a new name; no unmount, no overwrite
 
-- 决策内容：每次热发布用更大的版本号挂一个新容器，旧容器保持挂载到游戏退出。
-- 决策原因：游戏打开容器时不带 `FILE_SHARE_DELETE`，同名文件无法覆盖；卸载一个还有贴图在流送的容器可能崩溃。引擎对 `_N_P` 名字自动提高优先级，新版本一定压过旧版本。
-- 其他方案：先卸载旧容器、覆盖文件、再挂载。
-- 未选择原因：需要先保证该容器的资产全部释放，风险和实现量都更大。
-- 影响模块：`main.cpp` 的 `Watcher`，以及以后的打包器改动。
+- Decision: every hot publish mounts a new container with a higher version number; old containers stay mounted until the game exits.
+- Reason: the game opens containers without `FILE_SHARE_DELETE`, so a file of the same name cannot be overwritten; unmounting a container that still has textures streaming from it may crash. The engine raises the priority of `_N_P` names by itself, so a new version always outranks an old one.
+- Alternative: unmount the old container, overwrite the files, mount again.
+- Why not: that needs every asset of the container released first, which is more risk and more work.
+- Affected: `Watcher` in `main.cpp`, and later packager changes.
+- Superseded in part on the same day: see the two entries on unmounting at the end.
 
-## 2026-10-10 - 调用引擎自己的 MountPak 处理函数，用字符串和委托实例定位
+## 2026-10-10 - Call the engine's own MountPak handler, located by a string and the delegate instance
 
-- 决策内容：不写死地址和特征码。通过保留在 Shipping 版里的字符串 `Mounting pak file: %s \n` 找候选函数，再通过 `FCoreDelegates::MountPak` 的委托实例确认函数并取得 `FPakPlatformFile` 对象。
-- 决策原因：游戏代码在磁盘上加密，无法离线取特征码；游戏更新频繁（SigBypasser 日志在 2026-08-16 到 10-09 之间记录了 6 个不同的命中地址）；这条路径同时拿到函数和对象，不需要假设任何结构体偏移。
-- 其他方案：对 `FPakPlatformFile::Mount` 做特征码扫描；启动时 inline hook `Mount` 截获 `this`；走 `FPlatformFileManager` 链。
-- 未选择原因：特征码随更新失效；inline hook 要改游戏代码；后者依赖虚表索引。
-- 影响模块：`resolver.cpp`。
+- Decision: no hard-coded addresses or signatures. The string `Mounting pak file: %s \n`, which survives in shipping builds, gives the candidate functions, and the delegate instance of `FCoreDelegates::MountPak` confirms the function and yields the `FPakPlatformFile` object.
+- Reason: the game's code is encrypted on disk, so signatures cannot be taken offline; the game updates often (the SigBypasser log recorded 6 different hit addresses between 2026-08-16 and 10-09); this route yields function and object together without assuming any struct offsets.
+- Alternatives: a signature scan for `FPakPlatformFile::Mount`; an inline hook on `Mount` at startup to capture `this`; walking the `FPlatformFileManager` chain.
+- Why not: signatures break with updates; an inline hook changes game code; the last depends on vtable indices.
+- Affected: `resolver.cpp`.
 
-## 2026-10-10 - 只读不改，不做反作弊规避
+## 2026-10-10 - No evasion of the anti-cheat
 
-- 决策内容：插件只读取进程内存并调用引擎已有函数，不修改游戏代码，不做任何隐藏或绕过反作弊的事。
-- 决策原因：这是自用的开发工具；动作越少越稳，也不该碰反作弊。
-- 其他方案：无。
-- 影响模块：全部。
+- Decision: the plugin reads process memory and calls functions the engine already has; it does not modify game code and does nothing to hide from or get around the anti-cheat.
+- Reason: this is a development tool for personal use; the less it does the more stable it is, and the anti-cheat is not something to touch.
+- Note: the original wording was "read only, change nothing". Since the in-place reload the plugin does write to engine objects (pointers in object bodies); it still changes no code.
+- Affected: everything.
 
-## 2026-10-10 - 用线程消息钩子切到游戏线程
+## 2026-10-10 - A thread message hook to get onto the game thread
 
-- 决策内容：对 `UnrealWindow` 所在线程装 `WH_GETMESSAGE` 线程钩子，用 `PostThreadMessage` 投递自定义消息，在引擎取消息时执行挂载。
-- 决策原因：UE 在游戏线程上每帧取一次消息，位置在世界 Tick 之外；不需要再找一个引擎函数地址。
-- 其他方案：替换窗口过程；hook 引擎的 Tick。
-- 未选择原因：替换窗口过程会和其他子类化的工具（如 ReShade）相互影响；hook Tick 需要额外定位并改代码。
-- 影响模块：`game_thread.cpp`。
+- Decision: a `WH_GETMESSAGE` thread hook on the thread that owns the `UnrealWindow`, with `PostThreadMessage` posting a custom message; the work runs when the engine fetches its messages.
+- Reason: UE fetches messages once per frame on the game thread, outside the world tick; no further engine function has to be located.
+- Alternatives: replace the window procedure; hook the engine's tick.
+- Why not: replacing the window procedure interferes with other tools that subclass the window (ReShade, for example); hooking the tick needs another address and changes code.
+- Affected: `game_thread.cpp`.
 
-## 2026-10-10 - 轮询目录，不用通知文件
+## 2026-10-10 - Poll the directory, no notification file
 
-- 决策内容：每秒扫描一次 `Content\Paks`，以“文件可独占读打开且大小连续两次不变”判断写入完成。
-- 决策原因：打包器是先写临时文件再改名，文件一出现就是完整的；这样打包器完全不用改。
-- 其他方案：打包器写请求文件；`ReadDirectoryChangesW`。
-- 未选择原因：前者要改打包器；后者代码更多，而目录里只有几十个文件，轮询成本可忽略。
-- 影响模块：`main.cpp` 的 `Watcher`。
+- Decision: scan `Content\Paks` once a second and take a file as complete when it can be opened for exclusive reading and its size is the same twice in a row.
+- Reason: the packager writes temporary files and renames them, so a file is complete the moment it appears; the packager needs no change.
+- Alternatives: a request file written by the packager; `ReadDirectoryChangesW`.
+- Why not: the first changes the packager; the second is more code, and with a few dozen files in the directory the cost of polling is negligible.
+- Affected: `Watcher` in `main.cpp`.
 
-## 2026-10-10 - 顺序参数传 INDEX_NONE
+## 2026-10-10 - INDEX_NONE as the order argument
 
-- 决策内容：调用处理函数时 `PakOrder` 传 `-1`。
-- 决策原因：引擎会用和启动扫描相同的 `GetPakOrderFromPakFilePath` 计算，行为与启动时挂载的 Mod 完全一致。
-- 其他方案：显式传 3。
-- 未选择原因：那是对游戏目录结构的额外假设。
-- 影响模块：`main.cpp` 的 `CallHandleMountPak`。
+- Decision: the handler is called with `PakOrder` set to `-1`.
+- Reason: the engine then computes the order with the same `GetPakOrderFromPakFilePath` as its startup scan, so the result matches a mod mounted at startup exactly.
+- Alternative: pass 3 explicitly.
+- Why not: that is an extra assumption about the game's directory structure.
+- Affected: `CallHandleMountPak` in `main.cpp`.
 
-## 2026-10-10 - 挂载后通过 execCollectGarbage 请求垃圾回收
+## 2026-10-10 - Request collections through execCollectGarbage after a mount
 
-- 决策内容：v0.2.0 起，挂载成功后 120 秒内每 5 秒调用一次 `UKismetSystemLibrary::execCollectGarbage`。取代同日早些时候“v0.1 不做强制 GC”的做法。
-- 决策原因：真游戏里挂载成功但队伍内切换角色不刷新。没有主动回收时，“没变化”分不清是没卸载还是还没回收。
-- 为什么选这个入口：它只是请求引擎在下一帧自己回收，不需要拿 GC 锁；没有参数，用全零的假脚本帧就能调用；可以通过 UHT 生成的名字表稳定定位。
-- 其他方案：直接调 `CollectGarbage`；找 `UEngine::ForceGarbageCollection` 和 `GEngine`；绑热键手动触发。
-- 未选择原因：前者要在正确的时机和锁状态下调用；第二个函数太小，没有可用的锚点；热键需要轮询键盘或再装钩子。
-- 影响模块：`resolver.cpp` 的 `FindCollectGarbageThunk`，`main.cpp` 的 `Watcher::RequestCollection`。
+- Decision: from v0.2.0, `UKismetSystemLibrary::execCollectGarbage` is called every 5 seconds for 120 seconds after a successful mount. This replaces the earlier position of the same day that v0.1 forces no collection.
+- Reason: in the game the mount succeeded but switching characters within the party refreshed nothing. Without active collection, "no change" could mean either not unloaded or not collected yet.
+- Why this entry: it only asks the engine to collect on its next frame and needs no GC lock; it takes no parameters, so a zeroed fake script frame is enough to call it; and it can be located reliably through the name tables UHT generates.
+- Alternatives: call `CollectGarbage` directly; find `UEngine::ForceGarbageCollection` and `GEngine`; bind a hotkey.
+- Why not: the first has to be called at the right moment and lock state; the second function is too small and has no usable anchor; a hotkey needs keyboard polling or another hook.
+- Affected: `FindCollectGarbageThunk` in `resolver.cpp`, `Watcher::RequestCollection` in `main.cpp`.
 
-## 2026-10-10 - 部署到 Win64 根目录
+## 2026-10-10 - Deploy into the Win64 root
 
-- 决策内容：`HTReload.asi` 和 `HTReload.log` 放在游戏 `Win64` 根目录，与 `dsound.dll`、`Anticensor.asi` 并列。
-- 决策原因：用户平时就在这个目录看这些文件。
-- 其他方案：放 `Win64\plugins`，加载器同样会加载。
-- 影响模块：`deploy.ps1`。
+- Decision: `HTReload.asi` and `HTReload.log` live in the root of the game's `Win64` folder, next to `dsound.dll` and `Anticensor.asi`.
+- Reason: that is where the user looks at these files.
+- Alternative: `Win64\plugins`, which the loader loads as well.
+- Affected: `deploy.ps1`.
 
-## 2026-10-10 - 脚本保持 ASCII，源码用 /utf-8
+## 2026-10-10 - Scripts stay ASCII, sources are compiled with /utf-8
 
-- 决策内容：`.ps1` 只用 ASCII 和英文提示；C++ 源码是无 BOM 的 UTF-8，编译加 `/utf-8`，日志是中文。
-- 决策原因：Windows PowerShell 5.1 把无 BOM 脚本按系统代码页读取，中文会损坏甚至破坏语法。
-- 影响模块：`build.ps1`、`deploy.ps1`、`test\run.ps1`。
+- Decision: `.ps1` files use ASCII only; C++ sources are UTF-8 without BOM and compiled with `/utf-8`.
+- Reason: Windows PowerShell 5.1 reads BOM-less scripts in the system code page, which damages other characters and can even break the syntax.
+- Affected: `build.ps1`, `deploy.ps1`, `test\run.ps1`.
 
-## 2026-10-10 - 项目记忆持久化到 `.ai-memory`
+## 2026-10-10 - Project memory in `.ai-memory`
 
-- 决策内容：按 `D:\ueproject\HT\.ai-memory` 的做法，在本项目根目录维护同样的七个文件和 `project-memory-keeper` Skill。
-- 决策原因：用户明确要求。
-- 影响模块：项目工作流程。
+- Decision: following `D:\ueproject\HT\.ai-memory`, this project keeps the same seven files in its root, with the `project-memory-keeper` skill.
+- Reason: the user asked for it.
+- Affected: the project's workflow.
 
-## 2026-10-10 - 原地重载：改名、重新加载、替换引用，一个游戏线程任务内做完
+## 2026-10-10 - In-place reload: rename, load again, replace references, in one game-thread task
 
-- 决策内容：旧包用 `UObject::Rename` 改名让位，用 `LoadAsset_Blocking` 重新加载，再把指向旧资产的槽位换成新资产，最后请求垃圾回收。三步放在同一个游戏线程任务里。
-- 决策原因：用户要求在插件里实现“重新加载包并修正所有引用”。引擎的 `ReloadPackages` 被裁掉了，但加载器对改名包的处理还在。放在一个任务里是因为新对象在被引用之前不能遇到垃圾回收。
-- 其他方案：返回登录界面（可行但打断游戏）；只让贴图重新流送（用户明确不要只限贴图）。
-- 影响模块：`src/reload.cpp`、`src/engine.cpp`。
+- Decision: old packages are renamed out of the way with `UObject::Rename` and loaded again with `LoadAsset_Blocking`, then the slots that point at old assets are given the new ones, and finally collections are requested. The first three steps run in one game-thread task.
+- Reason: the user asked for "reload the packages and fix up all references" inside the plugin. The engine's `ReloadPackages` is stripped, but the loader's handling of renamed packages is not. One task, because the new objects must not meet a collection before something references them.
+- Alternatives: return to the login screen (works, but interrupts play); re-stream textures only (the user ruled out a texture-only solution).
+- Affected: `src/reload.cpp`, `src/engine.cpp`.
 
-## 2026-10-10 - 动态材质保留原对象，只换父材质
+## 2026-10-10 - Dynamic materials keep their object and get a new parent
 
-- 决策内容：动态材质不重建，直接改它的 `Parent`，再调 `CopyParameterOverrides(新父材质)`。
-- 决策原因：游戏把动态材质存在自己的容器里，换成新对象游戏不认。`CopyParameterOverrides` 是找到的唯一能从脚本函数触发 `InitResources()` 的途径。
-- 代价：动态材质上游戏设的参数被清掉。
-- 影响模块：`src/reload.cpp`。
+- Decision: a dynamic material is not recreated; its `Parent` is changed and `CopyParameterOverrides(new parent)` is called.
+- Reason: the game keeps dynamic materials in containers of its own and would not recognise new objects. `CopyParameterOverrides` is the only way found to trigger `InitResources()` from a script function.
+- Cost: the parameters the game had set on the dynamic material are cleared.
+- Affected: `src/reload.cpp`.
 
-## 2026-10-10 - 数值同时是名字编号的槽位，只认反射声明的对象属性
+## 2026-10-10 - Where a value also reads as a name id, only a declared object property counts as a slot
 
-- 决策内容：对象头里只有类指针算槽位。旧对象的地址如果也是名字池里某个条目的编号，那么只有主人的类（含父类）在该偏移声明了 `ObjectProperty` / `ClassProperty` 才改写，否则标“存疑”不动。
-- 决策原因：实测撞上了把名字字段当指针的情况。把地址写进名字字段会把一个无关对象改名，后果难查。
-- 取舍：不对所有槽位都要求反射声明，因为原生字段里的裸指针（比如组件 +0xdf8）也必须改，否则旧对象回收后会成为悬空指针。只在有歧义时才收紧。
-- 影响模块：`src/reload.cpp` 的 `Classify`、`src/objects.cpp` 的 `IsNameId`、`src/probe.cpp` 的 `FindSuperseded`。
+- Decision: of an object's header only the class pointer is a slot. Where an old object's address is also the id of an entry in the name pool, the slot is rewritten only if the owner's class (or a parent) declares an `ObjectProperty` / `ClassProperty` at that offset; otherwise it is marked doubtful and left.
+- Reason: a name field was in fact mistaken for a pointer during testing. Writing an address into a name field renames an unrelated object, with effects that are hard to trace.
+- Trade-off: a declared property is not required for every slot, because raw pointers in native fields (the component's +0xdf8, for example) have to be rewritten too, or they dangle once the old object is collected. The rule is only tightened where there is ambiguity.
+- Affected: `Classify` in `src/reload.cpp`, `IsNameId` in `src/objects.cpp`, `FindSuperseded` in `src/probe.cpp`.
 
-## 2026-10-10 - 挂载后自动重载，默认开启，没有开关
+## 2026-10-10 - Reload automatically after a mount, on by default, no switch
 
-- 决策内容：新容器挂载成功后立刻重载它里面的包。重载没完成就退回“返回登录界面”的老办法并在日志里说明。
-- 决策原因：用户的目标是打包后直接看到效果。手动重载已在真游戏里成功两次。
-- 这是我自己的判断，用户没有明确说要自动。没有做开关，等用户有需要再加。
-- 影响模块：`src/main.cpp` 的 `Watcher::ReloadMounted`。
+- Decision: when a new container has been mounted, its packages are reloaded right away. If the reload does not complete, the log says so and the older way of returning to the login screen remains.
+- Reason: the user's goal is to see the result right after packaging. The manual reload had succeeded twice in the game.
+- This was the assistant's judgement; the user had not asked for it to be automatic in so many words. There is no switch; one can be added when the user wants it.
+- Affected: `Watcher::ReloadMounted` in `src/main.cpp`.
 
-## 2026-10-10 - 重载后卸载旧容器，但不删文件
+## 2026-10-10 - Unmount old containers after a reload, without deleting files
 
-- 决策内容：重载完成、旧资产回收后，调用引擎的卸载处理函数卸掉被新版本完全取代的旧容器。插件不删除任何文件。
-- 决策原因：用户问旧三件套运行时能不能删（实测不能），随后说“做吧，重载后自动卸载旧容器”。用户要的是卸载；删文件不可恢复，他没有要求，留给他自己或以后的打包器。
-- 判定规则取保守的一侧：
-  - 只卸“每个包都在另一个编号严格更大的已挂载容器里”的容器。少一个包都不卸，否则那个包以后会加载不到或退回游戏本体的版本。
-  - 编号相同不卸。引擎对相同顺序是后挂载的优先，但启动时一起挂载的谁先谁后我不知道。
-  - 必须等带 `_HTOLD_` 的旧包全部被回收。旧资产还活着时卸载，它们若去读新版本里没有的数据块会读不到。
-  - “已挂载”同时看插件自己的记录和文件是否被占用，免得把打包器正在写的新包当成已挂载、从而提前卸掉当前版本。
-- 其他方案：只在退出游戏后清理（做不到用户要的运行时删除）；卸载后顺手删文件（没被要求，不做）。
-- 影响模块：`src/resolver.cpp`、`src/main.cpp`、`test/host.cpp`、`test/run.ps1`。
+- Decision: once a reload is done and the old assets are collected, the engine's unmount handler is called for old containers that the new version fully supersedes. The plugin deletes no files.
+- Reason: the user asked whether the old three files can be deleted while the game runs (measured: they cannot) and then asked for old containers to be unmounted automatically after a reload. Unmounting is what was asked; deleting cannot be undone and was not asked for.
+- The rule errs on the careful side:
+  - Only a container whose every package is also in another mounted container with a strictly higher number is unmounted. One missing package is enough to keep it, since that package would otherwise fail to load later or fall back to the game's own version.
+  - Equal numbers are not unmounted. With equal order the engine prefers the one mounted later, but which of two containers mounted together at startup came first is not known.
+  - All packages carrying `_HTOLD_` have to be collected first. Old assets that are still alive could ask for data blocks the new version does not have.
+  - "Mounted" looks both at the plugin's own record and at whether the file is held open, so that a new pak the packager is still writing is not taken for mounted, which would unmount the current version too early.
+- Alternatives: clean up only after the game exits (does not give deletion at run time); delete right after the unmount (not asked for).
+- Affected: `src/resolver.cpp`, `src/main.cpp`, `test/host.cpp`, `test/run.ps1`.
 
-## 2026-10-10 - 卸载后直接删除旧三件套（改掉上一条里“不删文件”）
+## 2026-10-10 - Delete the old three files right after the unmount (replaces "no deleting" above)
 
-- 决策内容：引擎卸载成功且文件确实放开后，插件用 `DeleteFileW` 删掉旧版本的 `.ucas`、`.utoc`、`.pak`。永久删除，不进回收站。
-- 决策原因：用户在真游戏里确认卸载后文件可删，随后明确要求“卸载句柄的同时直接删除文件就行了，不用等我来删除”。
-- 因为删除不可恢复，同时加了一条防护：取代它的容器必须不比它早挂载。否则用户把新包的编号起小了，这个刚发布的新包会被当成旧版本卸载并删掉。现在这种包只会得到一条日志提示。
-- 没有做的：进回收站（用户说直接删；每个版本约 360 MB，进回收站也达不到省空间的目的）；开关。
-- 影响模块：`src/main.cpp`、`test/host.cpp`、`test/run.ps1`、README。
+- Decision: when the engine has unmounted an old version and its file is really let go, the plugin deletes its `.ucas`, `.utoc` and `.pak` with `DeleteFileW`. Permanently, not to the recycle bin.
+- Reason: the user confirmed in the game that the files could be deleted after the unmount and then asked for them to be deleted directly, without waiting for a manual step.
+- Because deleting cannot be undone, a guard was added with it: the container that supersedes must not have been mounted before the one it supersedes. Otherwise a new pak published with too low a number would be unmounted and deleted as an old version. Such a pak now only gets a note in the log.
+- Not done: the recycle bin (the user said to delete directly, and at about 360 MB a version the recycle bin would not free the space either); a switch.
+- Affected: `src/main.cpp`, `test/host.cpp`, `test/run.ps1`, README.
