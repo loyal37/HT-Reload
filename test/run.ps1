@@ -63,8 +63,8 @@ function Send-Command([string]$line) {
     }
 }
 
-# The core logs a line starting with these two characters once it is watching for new paks.
-$ready = [string][char]0x5C31 + [char]0x7EEA
+# The core logs a line starting with this once it is watching for new paks.
+$ready = 'Ready:'
 Wait-Log 'the core to become ready' { param($text) $text.Contains($ready) }
 
 # Publish the way the packager does: complete temporary files renamed into place one by one.

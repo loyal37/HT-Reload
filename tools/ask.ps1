@@ -17,8 +17,8 @@ function Read-Shared([string]$path) {
     try { (New-Object IO.StreamReader $stream, ([Text.Encoding]::UTF8)).ReadToEnd() } finally { $stream.Dispose() }
 }
 
-# The core logs a line with this marker ("command done") after each command.
-$done = -join ([char[]](0x6307, 0x4EE4, 0x5B8C, 0x6210))
+# The core logs a line with this marker after each command.
+$done = 'Command done:'
 function Count-Done { ([regex]::Matches((Read-Shared (Join-Path $GameWin64 'HTReload.log')), [regex]::Escape($done))).Count }
 
 $wanted = (Count-Done) + @($Lines | Where-Object { $_.Trim() }).Count

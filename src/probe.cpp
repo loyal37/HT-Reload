@@ -276,7 +276,7 @@ void ReportReferences(const ObjectSystem& system, uintptr_t target, std::string&
             owner = static_cast<int32_t>(it - 1 - objects.begin());
         }
         if (inTable) {
-            report.Line("%#zx  对象表", hit.location);
+            report.Line("%#zx  object table", hit.location);
         } else if (owner >= 0) {
             std::string path;
             for (int32_t index = owner, depth = 0; index >= 0 && depth < 32; ++depth) {
@@ -286,11 +286,11 @@ void ReportReferences(const ObjectSystem& system, uintptr_t target, std::string&
             report.Line("%#zx  %s %s +%#zx", hit.location, nameOf(indexOf(objects[owner].klass)).c_str(), path.c_str(),
                         hit.location - objects[owner].address);
         } else {
-            report.Line("%#zx  对象外  前 %s  后 %s", hit.location, HexAt(hit.location - 0x20, 0x20).c_str(),
+            report.Line("%#zx  outside objects  before %s  after %s", hit.location, HexAt(hit.location - 0x20, 0x20).c_str(),
                         HexAt(hit.location, 0x20).c_str());
         }
     }
-    report.Line("共 %zu 处", hits.size());
+    report.Line("%zu in total", hits.size());
     out += report.Text();
 }
 
@@ -300,7 +300,7 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
     Report report;
     SYSTEMTIME now;
     GetLocalTime(&now);
-    report.Line("==================== 探测 %s  %02u:%02u:%02u ====================", label, now.wHour, now.wMinute, now.wSecond);
+    report.Line("==================== Probe %s  %02u:%02u:%02u ====================", label, now.wHour, now.wMinute, now.wSecond);
 
     ArenaVector<ObjectInfo> objects = system.Snapshot();
     auto indexOf = [&](uintptr_t address) -> int32_t {
@@ -357,10 +357,10 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
         }
     }
 
-    report.Line("对象 %zu 个，包 %zu 个；新包里有 %zu 个包，其中 %zu 个已加载，属于它们的对象 %zu 个", objects.size(), packageCount,
+    report.Line("%zu objects, %zu packages; the new containers hold %zu packages, %zu of them loaded, with %zu objects in them", objects.size(), packageCount,
                 packageIds.size(), supersededCount, targets.size());
     report.Line("");
-    report.Line("---- 已加载的旧对象（T<编号> 类 路径 对象标志 内部标志）----");
+    report.Line("---- Loaded old objects (T<n> class path object-flags internal-flags) ----");
     for (size_t t = 0; t < targets.size() && t < kMaxObjectLines; ++t) {
         const ObjectInfo& object = objects[targetIndex[t]];
         report.Line("T%zu %s %s %#x %#x%s", t, classOf(targetIndex[t]).c_str(), pathOf(targetIndex[t]).c_str(), object.objectFlags,
@@ -393,9 +393,9 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
         auto describe = [&](uintptr_t location) {
             char text[64];
             if (inMainImage(location)) {
-                snprintf(text, sizeof text, "主模块全局 RVA %#zx", location - mainImage);
+                snprintf(text, sizeof text, "image global RVA %#zx", location - mainImage);
             } else {
-                snprintf(text, sizeof text, "堆 %#zx", location);
+                snprintf(text, sizeof text, "heap %#zx", location);
             }
             return std::string(text);
         };
@@ -406,7 +406,7 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
 
         // Pass 1: slots that point straight at an old object.
         report.Line("");
-        report.Line("---- 直接指向旧对象的其他对象（类 路径 +偏移 -> T<编号>）----");
+        report.Line("---- Other objects pointing straight at old objects (class path +offset -> T<n>) ----");
         std::map<std::string, size_t> referencerClasses;
         ArenaVector<PointerHit> loose;  // slots outside any object, usually TArray/TMap/TSet storage
         for (const PointerHit& hit : hits) {
@@ -423,7 +423,7 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
                 if (objectHits++ < kMaxObjectLines) {
                     report.Line("%s %s +%#zx -> T%u%s", ownerClass.c_str(), pathOf(owner).c_str(),
                                 hit.location - objects[owner].address, hit.target,
-                                (objects[owner].internalFlags & kInternalRootSet) ? " [引用者是 RootSet]" : "");
+                                (objects[owner].internalFlags & kInternalRootSet) ? " [referrer is RootSet]" : "");
                 }
             } else {
                 ++looseHits;
@@ -434,23 +434,23 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
         }
         std::sort(loose.begin(), loose.end(), [](const PointerHit& a, const PointerHit& b) { return a.location < b.location; });
         report.Line("");
-        report.Line("---- 直接引用者按类汇总 ----");
+        report.Line("---- Direct referrers by class ----");
         for (const auto& [name, count] : referencerClasses) {
             report.Line("%6zu  %s", count, name.c_str());
         }
 
         report.Line("");
-        report.Line("---- 不在任何对象里的指针（位置 -> T<编号>，附前后内存）----");
+        report.Line("---- Pointers outside any object (location -> T<n>, with the memory around them) ----");
         for (size_t i = 0; i < loose.size() && i < kMaxLooseLines; ++i) {
             report.Line("%s -> T%u", describe(loose[i].location).c_str(), loose[i].target);
-            report.Line("    前 %s", HexAt(loose[i].location - 0x20, 0x20).c_str());
-            report.Line("    后 %s", HexAt(loose[i].location, 0x30).c_str());
+            report.Line("    before %s", HexAt(loose[i].location - 0x20, 0x20).c_str());
+            report.Line("    after  %s", HexAt(loose[i].location, 0x30).c_str());
         }
 
         // Pass 2: such a slot belongs to some heap block. Whoever points at an address shortly before it
         // is a candidate owner of that block. The block cannot start before an object that lies in between.
         report.Line("");
-        report.Line("---- 可能持有上述堆内存的对象（类 路径 +偏移 -> 堆块，块内 +距离 处指向 T<编号>）----");
+        report.Line("---- Objects that may own that heap memory (class path +offset -> heap block, +distance in it points at T<n>) ----");
         if (!loose.empty()) {
             ArenaVector<uintptr_t> starts;
             starts.reserve(loose.size() * (kOwnerSearchBytes / sizeof(uintptr_t)));
@@ -480,18 +480,18 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
                 if (first == loose.end() || first->location - block >= kOwnerSearchBytes) {
                     continue;
                 }
-                std::string ownerClass = owner >= 0 ? classOf(owner) : "(主模块全局)";
+                std::string ownerClass = owner >= 0 ? classOf(owner) : "(image global)";
                 ++ownerClasses[ownerClass];
                 if (ownerHits++ < kMaxObjectLines) {
                     std::string where = owner >= 0 ? pathOf(owner) : describe(hit.location);
-                    report.Line("%s %s +%#zx -> 堆块 %#zx，块内 +%#zx 处指向 T%u%s", ownerClass.c_str(), where.c_str(),
+                    report.Line("%s %s +%#zx -> heap block %#zx, +%#zx in it points at T%u%s", ownerClass.c_str(), where.c_str(),
                                 owner >= 0 ? hit.location - objects[owner].address : size_t{0}, block, first->location - block,
                                 first->target,
                                 (owner >= 0 && (objects[owner].internalFlags & kInternalRootSet)) ? " [RootSet]" : "");
                 }
             }
             report.Line("");
-            report.Line("---- 可能的持有者按类汇总 ----");
+            report.Line("---- Possible owners by class ----");
             for (const auto& [name, count] : ownerClasses) {
                 report.Line("%6zu  %s", count, name.c_str());
             }
@@ -499,12 +499,12 @@ void ProbeSupersededPackages(const ObjectSystem& system, const std::vector<uint6
     }
 
     report.Line("");
-    report.Line("汇总: 扫描 %.1f GB；对象表自身 %zu 处，旧对象之间 %zu 处，其他对象直接引用 %zu 处，对象外的指针 %zu 处，可能的持有者 %zu 处；耗时 %.1f 秒",
+    report.Line("Summary: scanned %.1f GB; %zu in the object table itself, %zu between old objects, %zu direct references from other objects, %zu pointers outside objects, %zu possible owners; took %.1f s",
                 scannedBytes / 1073741824.0, tableHits, internalHits, objectHits, looseHits, ownerHits,
                 (GetTickCount64() - started) / 1000.0);
     report.Line("");
     report.AppendTo(reportPath);
 
-    Log("探测 %s: 新包覆盖了 %zu 个已加载的包、%zu 个对象；其他对象直接引用 %zu 处，对象外的指针 %zu 处；耗时 %.1f 秒", label,
+    Log("Probe %s: the new containers supersede %zu loaded packages and %zu objects; %zu direct references from other objects, %zu pointers outside objects; took %.1f s", label,
         supersededCount, targets.size(), objectHits, looseHits, (GetTickCount64() - started) / 1000.0);
 }

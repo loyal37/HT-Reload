@@ -89,11 +89,11 @@ public:
         uintptr_t start = FunctionStart(address, &end);
         char text[96];
         if (!start) {
-            snprintf(text, sizeof text, "代码 RVA %#zx（无展开信息）", address - image_.base);
+            snprintf(text, sizeof text, "code RVA %#zx (no unwind info)", address - image_.base);
         } else if (start == address) {
-            snprintf(text, sizeof text, "函数 RVA %#zx 大小 %#zx", start - image_.base, end - start);
+            snprintf(text, sizeof text, "function RVA %#zx size %#zx", start - image_.base, end - start);
         } else {
-            snprintf(text, sizeof text, "函数 RVA %#zx +%#zx", start - image_.base, address - start);
+            snprintf(text, sizeof text, "function RVA %#zx +%#zx", start - image_.base, address - start);
         }
         return text;
     }
@@ -104,15 +104,15 @@ public:
         }
         char text[64];
         if (image_.Contains(value)) {
-            snprintf(text, sizeof text, "主模块数据 RVA %#zx", value - image_.base);
+            snprintf(text, sizeof text, "image data RVA %#zx", value - image_.base);
             return text;
         }
         if (int32_t index = IndexOf(value); index >= 0) {
-            return "对象 " + ClassName(index) + " " + Path(index);
+            return "object " + ClassName(index) + " " + Path(index);
         }
         if (int32_t index = PlausibleHeapPointer(image_, value) ? Containing(value) : -1; index >= 0) {
             snprintf(text, sizeof text, " +%#zx", value - Objects()[index].address);
-            return "对象内部 " + ClassName(index) + " " + Name(index) + text;
+            return "inside object " + ClassName(index) + " " + Name(index) + text;
         }
         return {};
     }
@@ -127,7 +127,7 @@ void DumpWords(std::string& out, Annotator& annotator, uintptr_t address, size_t
     for (size_t offset = 0; offset < bytes; offset += sizeof(uintptr_t)) {
         uintptr_t value = 0;
         if (!SafeRead(address + offset, &value, sizeof value)) {
-            Append(out, "+%04zx  （不可读）", offset);
+            Append(out, "+%04zx  (unreadable)", offset);
             break;
         }
         Append(out, "+%04zx  %016zx  %s", offset, value, annotator.Describe(value).c_str());
@@ -181,15 +181,15 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
                 continue;
             }
             int32_t index = static_cast<int32_t>(i);
-            Append(out, "%#zx  %s  %s  标志 %#x 内部 %#x 大小 %#x", objects[i].address, annotator.ClassName(index).c_str(),
+            Append(out, "%#zx  %s  %s  flags %#x internal %#x size %#x", objects[i].address, annotator.ClassName(index).c_str(),
                    annotator.Path(index).c_str(), objects[i].objectFlags, objects[i].internalFlags, objects[i].size);
             ++shown;
         }
-        Append(out, "共列出 %zu 个（对象总数 %zu）", shown, objects.size());
+        Append(out, "%zu listed (%zu objects in total)", shown, objects.size());
     } else if (command == "obj") {
         int32_t index = annotator.IndexOf(number);
         if (index < 0) {
-            Append(out, "%#zx 不是对象表里的对象", number);
+            Append(out, "%#zx is not an object in the object table", number);
             return true;
         }
         Append(out, "%s  %s", annotator.ClassName(index).c_str(), annotator.Path(index).c_str());
@@ -201,17 +201,17 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
                 break;
             }
         }
-        Append(out, "类: %s", chain.c_str());
+        Append(out, "class: %s", chain.c_str());
         DumpWords(out, annotator, number, annotator.Objects()[index].size);
     } else if (command == "mem") {
         DumpWords(out, annotator, number, count ? count : 0x100);
     } else if (command == "vtable") {
         uintptr_t table = 0;
         if (!SafeRead(number, &table, sizeof table)) {
-            Append(out, "读不到 %#zx", number);
+            Append(out, "cannot read %#zx", number);
             return true;
         }
-        Append(out, "虚表 %s", annotator.Describe(table).c_str());
+        Append(out, "vtable %s", annotator.Describe(table).c_str());
         for (size_t i = 0; i < (count ? count : 128); ++i) {
             uintptr_t entry = 0;
             if (!SafeRead(table + i * sizeof entry, &entry, sizeof entry) || !Image::In(image.exec, entry)) {
@@ -225,7 +225,7 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
             uint8_t raw[32];
             size_t length = std::min<size_t>(sizeof raw, bytes - offset);
             if (!SafeRead(image.base + number + offset, raw, length)) {
-                Append(out, "%#zx 不可读", number + offset);
+                Append(out, "%#zx unreadable", number + offset);
                 break;
             }
             Append(out, "%#010zx  %s", number + offset, Hex(raw, length).c_str());
@@ -236,13 +236,13 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
             wide.push_back(static_cast<unsigned char>(c));
         }
         std::vector<uintptr_t> matches = FindBytes(image.readOnly, wide.data(), wide.size() * sizeof(wchar_t));
-        Append(out, "含该文字的字符串 %zu 处", matches.size());
+        Append(out, "%zu strings contain that text", matches.size());
         for (size_t i = 0; i < matches.size() && i < 8; ++i) {
             uintptr_t start = WideStringStart(matches[i]);
-            Append(out, "字符串 RVA %#zx: %s", start - image.base, ReadWideString(start).c_str());
+            Append(out, "string RVA %#zx: %s", start - image.base, ReadWideString(start).c_str());
             size_t faulted = 0;
             for (uintptr_t ref : FindLeaRefs(image.exec, start, &faulted)) {
-                Append(out, "    被引用于 %s", annotator.Code(ref - 3).c_str());
+                Append(out, "    referenced from %s", annotator.Code(ref - 3).c_str());
             }
             // UE_LOG keeps its format string in a static record and the code takes the record's address.
             for (const std::vector<Region>* regions : {&image.readOnly, &image.writable}) {
@@ -250,9 +250,9 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
                     if (slot % sizeof(uintptr_t)) {
                         continue;
                     }
-                    Append(out, "    指针位于 RVA %#zx", slot - image.base);
+                    Append(out, "    pointer at RVA %#zx", slot - image.base);
                     for (uintptr_t ref : FindLeaRefs(image.exec, slot, &faulted)) {
-                        Append(out, "        该处被引用于 %s", annotator.Code(ref - 3).c_str());
+                        Append(out, "        which is referenced from %s", annotator.Code(ref - 3).c_str());
                     }
                 }
             }
@@ -261,11 +261,11 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
         std::string pattern = std::string(1, '\0') + arguments + std::string(1, '\0');
         for (uintptr_t match : FindBytes(image.readOnly, pattern.data(), pattern.size())) {
             uintptr_t text = match + 1;
-            Append(out, "字符串 RVA %#zx", text - image.base);
+            Append(out, "string RVA %#zx", text - image.base);
             for (const std::vector<Region>* regions : {&image.readOnly, &image.writable}) {
                 for (uintptr_t slot : FindBytes(*regions, &text, sizeof text)) {
                     if (slot % sizeof(uintptr_t) == 0) {
-                        Append(out, "  指针位于 RVA %#zx", slot - image.base);
+                        Append(out, "  pointer at RVA %#zx", slot - image.base);
                         DumpWords(out, annotator, slot - 2 * sizeof(uintptr_t), 5 * sizeof(uintptr_t));
                     }
                 }
@@ -299,7 +299,7 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
             uintptr_t native = 0;
             SafeRead(view[index].address + kFunctionFlagsOffset, &header, sizeof header);
             SafeRead(view[index].address + view[index].size - sizeof native, &native, sizeof native);
-            Append(out, "%#zx  %s  参数 %u 个 共 %#x 字节，返回值偏移 %#x，标志 %#x，原生 %s", view[index].address,
+            Append(out, "%#zx  %s  %u parameters in %#x bytes, return value at %#x, flags %#x, native %s", view[index].address,
                    view.Name(index).c_str(), header.numParams, header.paramsSize, header.returnOffset, header.flags,
                    annotator.Code(native).c_str());
         }
@@ -343,8 +343,8 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
                 SafeRead(fieldClass, typeName, sizeof typeName);  // FFieldClass starts with its name
                 std::string text = system.Name(name[0], name[1]);
                 if (Lower(text).find(wanted) != std::string::npos) {
-                    Append(out, "+%#06x  %-22s %s  大小 %#x%s  标志 %#llx", offset, system.Name(typeName[0], typeName[1]).c_str(),
-                           text.c_str(), elementSize, arraySize > 1 ? " (数组)" : "", flags);
+                    Append(out, "+%#06x  %-22s %s  size %#x%s  flags %#llx", offset, system.Name(typeName[0], typeName[1]).c_str(),
+                           text.c_str(), elementSize, arraySize > 1 ? " (array)" : "", flags);
                 }
                 property = next;
             }

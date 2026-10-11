@@ -131,7 +131,7 @@ void AttachToGameThread() {
     g_gameThread = threadId;
     g_hook = SetWindowsHookExW(WH_GETMESSAGE, OnGetMessage, nullptr, threadId);
     if (g_hook) {
-        Logf("外壳: 已接入游戏线程 %lu", threadId);
+        Logf("Shell: attached to game thread %lu", threadId);
     }
 }
 
@@ -199,7 +199,7 @@ void UnloadCore() {
         FreeLibrary(g_core.module);
         DeleteFileW(g_core.copy.c_str());
     } else {
-        Logf("外壳: 旧核心没能在限定时间内停下，保留在内存里不卸载");
+        Logf("Shell: the old core did not stop in time; it stays in memory and is not unloaded");
     }
     g_core = Core{};
 }
@@ -210,30 +210,30 @@ void LoadCore(const std::wstring& source, const FileStamp& stamp) {
     core.stamp = stamp;
     core.copy = g_directory + L"\\HTReload.core.run" + std::to_wstring(g_host.generation) + L".dll";
     if (!CopyFileW(source.c_str(), core.copy.c_str(), FALSE)) {
-        Logf("外壳: 复制核心失败 (错误 %lu)", GetLastError());
+        Logf("Shell: copying the core failed (error %lu)", GetLastError());
         return;
     }
     core.module = LoadLibraryW(core.copy.c_str());
     if (!core.module) {
-        Logf("外壳: 加载核心失败 (错误 %lu)", GetLastError());
+        Logf("Shell: loading the core failed (error %lu)", GetLastError());
         return;
     }
     auto start = reinterpret_cast<CoreStartFn>(GetProcAddress(core.module, "CoreStart"));
     core.stop = reinterpret_cast<CoreStopFn>(GetProcAddress(core.module, "CoreStop"));
     if (!start || !core.stop || !start(&g_host)) {
-        Logf("外壳: 核心拒绝启动或缺少入口");
+        Logf("Shell: the core refused to start or has no entry point");
         FreeLibrary(core.module);
         DeleteFileW(core.copy.c_str());
         return;
     }
-    Logf(g_host.generation == 0 ? "外壳: 核心已加载" : "外壳: 核心已更换（第 %u 次）", g_host.generation);
+    Logf(g_host.generation == 0 ? "Shell: core loaded" : "Shell: core replaced (replacement %u)", g_host.generation);
     ++g_host.generation;
     g_core = core;
 }
 
 DWORD WINAPI Run(void*) {
     OpenLog();
-    Logf("外壳: 启动，目录 %ls", g_directory.c_str());
+    Logf("Shell: started in %ls", g_directory.c_str());
 
     // Copies left behind by an earlier run of the game.
     std::error_code error;

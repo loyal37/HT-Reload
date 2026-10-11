@@ -65,7 +65,7 @@ void LogBytes(const char* label, uintptr_t address, size_t size) {
         uint8_t bytes[32];
         size_t count = std::min<size_t>(sizeof bytes, size - offset);
         if (!SafeRead(address + offset, bytes, count)) {
-            Log("  %s +%03zx 不可读", label, offset);
+            Log("  %s +%03zx unreadable", label, offset);
             return;
         }
         Log("  %s +%03zx %s", label, offset, Hex(bytes, count).c_str());
@@ -96,7 +96,7 @@ uintptr_t FindCollectGarbageThunk(const Image& image) {
     static const char kName[] = "\0CollectGarbage";
     std::vector<uintptr_t> names = FindBytes(image.readOnly, kName, sizeof kName);
     if (names.size() != 1) {
-        Log("垃圾回收: 函数名出现 %zu 次，需要正好 1 次", names.size());
+        Log("GC: the function name occurs %zu times, exactly 1 is needed", names.size());
         return 0;
     }
     uintptr_t name = names[0] + 1;
@@ -130,11 +130,11 @@ uintptr_t FindCollectGarbageThunk(const Image& image) {
         }
     }
     if (thunks.size() != 1) {
-        Log("垃圾回收: 找到 %zu 个可能的入口，需要正好 1 个，本次运行不主动触发回收", thunks.size());
+        Log("GC: found %zu candidate entries, exactly 1 is needed; no collections will be requested in this run", thunks.size());
         return 0;
     }
-    Log("垃圾回收: execCollectGarbage RVA %#zx", thunks[0] - image.base);
-    LogBytes("入口", thunks[0], 0x40);
+    Log("GC: execCollectGarbage RVA %#zx", thunks[0] - image.base);
+    LogBytes("entry", thunks[0], 0x40);
     return thunks[0];
 }
 
@@ -158,7 +158,7 @@ uintptr_t FindEngineGlobal(uintptr_t collectGarbageThunk) {
 uintptr_t FindUnmountHandler(const Image& image, uintptr_t pakPlatformFile) {
     std::vector<uintptr_t> strings = FindBytes(image.readOnly, kUnmountAnchor, sizeof kUnmountAnchor);
     if (strings.size() != 1) {
-        Log("卸载: 锚点字符串出现 %zu 次，需要正好 1 次，本次运行不卸载旧容器", strings.size());
+        Log("Unmount: the anchor string occurs %zu times, exactly 1 is needed; old containers will not be unmounted in this run", strings.size());
         return 0;
     }
     std::vector<uintptr_t> candidates;
@@ -176,14 +176,14 @@ uintptr_t FindUnmountHandler(const Image& image, uintptr_t pakPlatformFile) {
         }
     });
     if (bound.size() != 1) {
-        Log("卸载: 引用锚点的函数 %zu 个，其中绑定到挂载对象的 %zu 个，需要正好 1 个，本次运行不卸载旧容器", candidates.size(),
+        Log("Unmount: %zu functions use the anchor, %zu of them bound to the mount object, exactly 1 is needed; old containers will not be unmounted in this run", candidates.size(),
             bound.size());
         return 0;
     }
     uintptr_t functionEnd = 0;
     FunctionStart(bound[0], &functionEnd);
-    Log("卸载: HandleUnmountPakDelegate RVA %#zx 大小 %#zx", bound[0] - image.base, functionEnd - bound[0]);
-    LogBytes("函数", bound[0], std::min<size_t>(functionEnd > bound[0] ? functionEnd - bound[0] : 0, 0x80));
+    Log("Unmount: HandleUnmountPakDelegate RVA %#zx size %#zx", bound[0] - image.base, functionEnd - bound[0]);
+    LogBytes("code", bound[0], std::min<size_t>(functionEnd > bound[0] ? functionEnd - bound[0] : 0, 0x80));
     return bound[0];
 }
 
@@ -205,7 +205,7 @@ bool Resolver::FindCandidates(const Image& image, bool verbose) {
     }
     if (strings.size() != 1) {
         if (verbose) {
-            Log("定位(第%d次): 锚点字符串出现 %zu 次，需要正好 1 次", attempts_, strings.size());
+            Log("Locate (attempt %d): the anchor string occurs %zu times, exactly 1 is needed", attempts_, strings.size());
         }
         return false;
     }
@@ -221,7 +221,7 @@ bool Resolver::FindCandidates(const Image& image, bool verbose) {
     }
     if (functions.empty()) {
         if (verbose) {
-            Log("定位(第%d次): 锚点 RVA %#zx 有 %zu 处引用，但没有可用函数（代码段可能尚未解密，不可读页 %zu）",
+            Log("Locate (attempt %d): anchor RVA %#zx has %zu references but no usable function (the code may not be unpacked yet; unreadable pages %zu)",
                 attempts_, strings[0] - image.base, refs.size(), faultedPages);
         }
         return false;
@@ -232,11 +232,11 @@ bool Resolver::FindCandidates(const Image& image, bool verbose) {
         return true;
     }
     candidates_ = functions;
-    Log("定位: 锚点 RVA %#zx，引用 %zu 处，候选函数 %zu 个", strings[0] - image.base, refs.size(), functions.size());
+    Log("Locate: anchor RVA %#zx, %zu references, %zu candidate functions", strings[0] - image.base, refs.size(), functions.size());
     for (uintptr_t function : candidates_) {
         uintptr_t functionEnd = 0;
         FunctionStart(function, &functionEnd);
-        Log("  候选函数 RVA %#zx 大小 %#zx", function - image.base, functionEnd - function);
+        Log("  candidate RVA %#zx size %#zx", function - image.base, functionEnd - function);
     }
     return true;
 }
@@ -259,7 +259,7 @@ bool Resolver::FindBoundInstance(const Image& image, bool verbose) {
             api_.handleMountPak = words[index];
             api_.pakPlatformFile = words[index - 1];
         }
-        Log("  绑定: 全局 RVA %#zx -> 实例 %#zx 偏移 %#zx，函数 RVA %#zx，对象 %#zx", slot - image.base, storage,
+        Log("  binding: global RVA %#zx -> instance %#zx offset %#zx, function RVA %#zx, object %#zx", slot - image.base, storage,
             index * sizeof(uintptr_t), words[index] - image.base, words[index - 1]);
     };
 
@@ -267,22 +267,22 @@ bool Resolver::FindBoundInstance(const Image& image, bool verbose) {
 
     if (hits == 0) {
         if (verbose) {
-            Log("定位(第%d次): 尚未找到绑定到候选函数的挂载委托（引擎可能还没初始化完）", attempts_);
+            Log("Locate (attempt %d): no mount delegate bound to a candidate yet (the engine may still be initialising)", attempts_);
         }
         return false;
     }
     if (hits > 1) {
-        Log("警告: 找到 %zu 处不同的绑定，使用第一处", hits);
+        Log("Warning: found %zu different bindings, using the first", hits);
     }
 
     uintptr_t functionEnd = 0;
     FunctionStart(api_.handleMountPak, &functionEnd);
     size_t size = std::min<size_t>(functionEnd > api_.handleMountPak ? functionEnd - api_.handleMountPak : 0, 0x180);
-    Log("定位完成: HandleMountPakDelegate RVA %#zx，FPakPlatformFile %#zx", api_.handleMountPak - image.base,
+    Log("Located: HandleMountPakDelegate RVA %#zx, FPakPlatformFile %#zx", api_.handleMountPak - image.base,
         api_.pakPlatformFile);
-    LogBytes("函数", api_.handleMountPak, size);
+    LogBytes("code", api_.handleMountPak, size);
     if (!ComparesWithIndexNone(api_.handleMountPak, size)) {
-        Log("警告: 函数里没看到与 INDEX_NONE 的比较，参数形式可能和 UE 5.6 原版不同");
+        Log("Warning: the function has no comparison with INDEX_NONE; its parameters may differ from stock UE 5.6");
     }
     return true;
 }

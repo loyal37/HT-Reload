@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.7.1";
+const char kVersion[] = "0.7.2";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -240,7 +240,7 @@ public:
             handled_.insert(Key(pak));
             mounted_[Key(pak)] = 0;
         }
-        Log("磁盘上已有 %zu 个 pak，视为已挂载", handled_.size());
+        Log("%zu paks on disk, taken as mounted", handled_.size());
     }
 
     void Poll() {
@@ -286,9 +286,9 @@ private:
         auto job = std::make_shared<MountJob>();
         job->enginePath = paths_.enginePrefix + relative.generic_wstring();
         if (!pak.stem().wstring().ends_with(L"_P")) {
-            Log("注意: %s 的名字不以 _P 结尾，优先级不会高于游戏本体", Utf8(pak.filename().wstring()).c_str());
+            Log("Note: the name of %s does not end in _P, so it will not outrank the game's own paks", Utf8(pak.filename().wstring()).c_str());
         }
-        Log("发现新包，请求挂载: %s", Utf8(job->enginePath).c_str());
+        Log("New pak, requesting mount: %s", Utf8(job->enginePath).c_str());
 
         MountApi api = api_;
         if (!GameThread_Run([job, api] {
@@ -296,7 +296,7 @@ private:
                                                   static_cast<int32_t>(job->enginePath.size()), &job->exceptionCode);
                 SetEvent(job->done);
             })) {
-            Log("失败: 无法向游戏线程投递请求 (错误 %lu)", GetLastError());
+            Log("Failed: could not post the request to the game thread (error %lu)", GetLastError());
             return;
         }
 
@@ -310,22 +310,22 @@ private:
                 return;  // shutting down
             }
             if (waited == 25) {
-                Log("游戏线程 30 秒内没有处理请求（可能正在加载），继续等待");
+                Log("The game thread has not handled the request for 30 seconds (it may be loading); still waiting");
             }
         }
 
         if (job->exceptionCode) {
             disabled_ = true;
-            Log("严重: 挂载调用抛出异常 %#lx，已停止后续挂载，建议重启游戏", job->exceptionCode);
+            Log("Fatal: the mount call raised exception %#lx; no further mounts in this run, restarting the game is advised", job->exceptionCode);
             Beep(300, 600);
         } else if (job->pakFile) {
-            Log("挂载成功 (IPakFile %p)", job->pakFile);
+            Log("Mounted (IPakFile %p)", job->pakFile);
             mounted_[Key(pak)] = ++mountSequence_;
             Beep(1200, 120);
             Beep(1600, 160);
             ReloadMounted(pak);
         } else {
-            Log("失败: 引擎拒绝挂载这个包（返回空）");
+            Log("Failed: the engine refused to mount this pak (returned null)");
             Beep(400, 400);
         }
     }
@@ -339,7 +339,7 @@ private:
         for (const Container& other : MountedModContainers()) {
             bool shares = std::find_first_of(ids.begin(), ids.end(), other.ids.begin(), other.ids.end()) != ids.end();
             if (shares && other.rank > PatchRank(pak)) {
-                Log("注意: 已挂载的 %s 编号更大，同名资产游戏仍会用它。新版本请用比它更大的编号",
+                Log("Note: %s is mounted with a higher number, so the game keeps using its assets. Give a new version a higher number than that",
                     Utf8(other.pak.stem().wstring()).c_str());
                 break;
             }
@@ -347,27 +347,27 @@ private:
         ReloadResult result = ReloadResult::Failed;
         std::string report;
         if (ids.empty()) {
-            report = "读不出这个容器里有哪些包\r\n";
+            report = "Could not read which packages this container holds\r\n";
         } else if (!EnsureObjects()) {
-            report = "对象系统不可用\r\n";
+            report = "The object system is not available\r\n";
         } else {
             result = reloader_.Reload(ids, report);
         }
         WriteWholeFile(paths_.moduleDir / L"HTReload.reload.txt", report);
-        LogReport("重载", report);
+        LogReport("Reload", report);
         ULONGLONG window = kCollectWindowMs;
         if (result == ReloadResult::Done) {
-            Log("重载完成，新版本已经生效");
+            Log("Reload done, the new version is live");
             Beep(2000, 200);
             window = 20000;  // the old assets are unreferenced now and go with the next collection
         } else if (result == ReloadResult::Failed) {
-            Log("重载没有完成，明细在 HTReload.reload.txt。返回登录界面再进入可以让新版本生效");
+            Log("Reload not completed, details are in HTReload.reload.txt. Returning to the login screen and entering again brings the new version in");
             Beep(400, 400);
         }
         if (collectGarbage_ && !collectFailed_->load()) {
             collectUntil_ = GetTickCount64() + window;
             nextCollect_ = 0;
-            Log("接下来 %llu 秒内每 %llu 秒请求一次垃圾回收", window / 1000, kCollectIntervalMs / 1000);
+            Log("For the next %llu seconds a collection is requested every %llu seconds", window / 1000, kCollectIntervalMs / 1000);
         }
         // With the game on the new version, the older ones can be unmounted once their assets are gone.
         if (result != ReloadResult::Failed) {
@@ -445,10 +445,10 @@ private:
             file.replace_extension(extension);
             DWORD error = DeleteFileW(file.c_str()) ? ERROR_SUCCESS : GetLastError();
             if (error != ERROR_SUCCESS && error != ERROR_FILE_NOT_FOUND) {
-                return "已卸载，但删不掉 " + Utf8(file.filename().wstring()) + "（错误 " + std::to_string(error) + "）";
+                return "unmounted, but could not delete " + Utf8(file.filename().wstring()) + " (error " + std::to_string(error) + ")";
             }
         }
-        return "已卸载并删除";
+        return "unmounted and deleted";
     }
 
     // Has the engine unmount the containers that newer versions have made redundant, which makes it
@@ -461,21 +461,21 @@ private:
             api_.handleUnmountPak = FindUnmountHandler(*image_, api_.pakPlatformFile);
         }
         if (!api_.handleUnmountPak || unmountDisabled_) {
-            report += unmountDisabled_ ? "卸载已停用\r\n" : "没找到引擎的卸载入口\r\n";
+            report += unmountDisabled_ ? "Unmounting is disabled\r\n" : "The engine's unmount handler was not found\r\n";
             return true;
         }
         std::vector<fs::path> shadowed = ShadowedContainers();
         if (shadowed.empty()) {
-            report += "没有被新版本完全取代的旧容器\r\n";
+            report += "No container is fully superseded by a newer version\r\n";
             return true;
         }
         if (!EnsureObjects()) {
-            report += "对象系统不可用，不卸载\r\n";
+            report += "The object system is not available; nothing is unmounted\r\n";
             return true;
         }
         size_t retired = reloader_.RetiredPackagesAlive();
         if (retired) {
-            report += "还有 " + std::to_string(retired) + " 个旧包没有被回收，旧容器保持挂载\r\n";
+            report += std::to_string(retired) + " old packages have not been collected; old containers stay mounted\r\n";
             return false;
         }
         for (const fs::path& pak : shadowed) {
@@ -497,18 +497,18 @@ private:
                 30000);
             std::string name = Utf8(pak.stem().wstring());
             if (!ran) {
-                report += name + ": 游戏线程没有执行卸载\r\n";
+                report += name + ": the game thread did not run the unmount\r\n";
             } else if (exceptionCode) {
                 unmountDisabled_ = true;
                 char code[32];
                 snprintf(code, sizeof code, "%#lx", exceptionCode);
-                report += name + ": 严重: 卸载调用抛出异常 " + code + "，已停止后续卸载，建议重启游戏\r\n";
+                report += name + ": fatal: the unmount call raised exception " + code + "; no further unmounts in this run, restarting the game is advised\r\n";
                 Beep(300, 600);
             } else if (!unmounted) {
-                report += name + ": 引擎没有卸载它（返回否），路径 " + Utf8(enginePath) + "\r\n";
+                report += name + ": the engine did not unmount it (returned false), path " + Utf8(enginePath) + "\r\n";
             } else if (HeldOpen(ucas)) {
                 mounted_.erase(Key(pak));
-                report += name + ": 引擎已卸载，但文件仍被占用，没有删除\r\n";
+                report += name + ": unmounted by the engine, but its files are still held open; nothing deleted\r\n";
             } else {
                 mounted_.erase(Key(pak));
                 report += name + ": " + DeleteContainer(pak) + "\r\n";
@@ -530,7 +530,7 @@ private:
             return;
         }
         unmountCheckAt_ = 0;
-        LogReport("卸载", report);
+        LogReport("Unmount", report);
     }
 
     // Instructions dropped into HTReload.cmd.txt next to the plugin, one per line. Answers go to
@@ -566,15 +566,15 @@ private:
             if (command.empty()) {
                 continue;
             }
-            Log("指令: %s", line.c_str());
+            Log("Command: %s", line.c_str());
             answers += "### " + line + "\r\n";
             try {
                 RunCommand(command, arguments, answers);
             } catch (const std::exception& exception) {
-                Log("指令失败: %s", exception.what());
-                answers += std::string("失败: ") + exception.what() + "\r\n";
+                Log("Command failed: %s", exception.what());
+                answers += std::string("Failed: ") + exception.what() + "\r\n";
             }
-            Log("指令完成: %s", line.c_str());
+            Log("Command done: %s", line.c_str());
         }
         WriteWholeFile(paths_.moduleDir / L"HTReload.out.txt", answers);
     }
@@ -593,15 +593,15 @@ private:
             return;
         }
         if (!EnsureObjects()) {
-            answers += "对象系统不可用\r\n";
+            answers += "The object system is not available\r\n";
             return;
         }
         if (command == "probe") {
             std::vector<uint64_t> ids = ModPackageIds(second);
             if (ids.empty()) {
-                answers += "没有匹配的 Mod 容器\r\n";
+                answers += "No matching mod container\r\n";
             } else {
-                ProbeSupersededPackages(*objects_, ids, reportPath_, first.empty() ? "手动" : first.c_str());
+                ProbeSupersededPackages(*objects_, ids, reportPath_, first.empty() ? "manual" : first.c_str());
             }
         } else if (command == "engine") {
             reloader_.Resolve(answers);
@@ -622,11 +622,11 @@ private:
             for (const fs::path& pak : ShadowedContainers()) {
                 answers += Utf8(pak.wstring()) + "\r\n";
             }
-            answers += "还活着的旧包: " + std::to_string(reloader_.RetiredPackagesAlive()) + " 个\r\n";
+            answers += "Old packages still alive: " + std::to_string(reloader_.RetiredPackagesAlive()) + "\r\n";
         } else if (command == "unmount") {
             UnmountShadowed(answers);
         } else if (!Explore(command, arguments, *image_, *objects_, answers)) {
-            answers += "不认识的指令\r\n";
+            answers += "Unknown command\r\n";
         }
     }
 
@@ -664,10 +664,10 @@ private:
             return;
         }
         if (collectFailed_->load()) {
-            Log("严重: 请求垃圾回收时抛出异常，已停用这个功能");
+            Log("Fatal: requesting a collection raised an exception; collections are disabled");
             collectUntil_ = 0;
         } else if (now >= collectUntil_) {
-            Log("垃圾回收请求结束");
+            Log("Collection requests ended");
             collectUntil_ = 0;
         } else if (now >= nextCollect_) {
             nextCollect_ = now + kCollectIntervalMs;
@@ -701,11 +701,11 @@ private:
 
 void Run() {
     Paths paths = MakePaths();
-    Log("核心 %s，监视目录: %s", kVersion, Utf8(paths.paksDir.wstring()).c_str());
+    Log("Core %s, watching %s", kVersion, Utf8(paths.paksDir.wstring()).c_str());
 
     Image image;
     if (!image.Open()) {
-        Log("失败: 无法读取游戏主模块");
+        Log("Failed: cannot read the game's main module");
         return;
     }
 
@@ -721,7 +721,7 @@ void Run() {
             break;
         }
         if (attempt >= 300) {
-            Log("放弃: 一直没能定位挂载入口，本次运行不提供热重载");
+            Log("Giving up: the mount handler was never located; no hot reload in this run");
             return;
         }
         if (WaitStop(attempt < 15 ? 1000 : 5000)) {
@@ -741,7 +741,7 @@ void Run() {
             return;
         }
     }
-    Log("就绪: 开始监视新包和指令");
+    Log("Ready: watching for new paks and commands");
 
     while (!WaitStop(1000)) {
         watcher.Poll();
@@ -752,9 +752,9 @@ DWORD WINAPI Worker(void*) {
     try {
         Run();
     } catch (const std::exception& exception) {
-        Log("异常退出: %s", exception.what());
+        Log("Worker ended by an exception: %s", exception.what());
     } catch (...) {
-        Log("异常退出");
+        Log("Worker ended by an exception");
     }
     return 0;
 }

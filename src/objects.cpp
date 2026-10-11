@@ -92,11 +92,11 @@ void ForEachWritableSlot(const Image& image, Visitor&& visit) {
 
 bool ObjectSystem::Locate(const Image& image) {
     if (!nameBlocks_ && !FindNamePool(image)) {
-        Log("对象系统: 没找到名字池（开头不是 None / ByteProperty，可能被游戏改过）");
+        Log("Objects: name pool not found (it does not start with None / ByteProperty; the game may have changed it)");
         return false;
     }
     if (!objectArray_ && !FindObjectArray(image)) {
-        Log("对象系统: 没找到对象表");
+        Log("Objects: object table not found");
         return false;
     }
     if (!propertiesSizeOffset_) {
@@ -109,15 +109,15 @@ std::string ObjectSystem::Describe(uintptr_t object) const {
     ObjectHeader header;
     ObjectHeader classHeader;
     if (!nameBlocks_ || !object || !SafeRead(object, &header, sizeof header)) {
-        return "(读不到)";
+        return "(unreadable)";
     }
     std::string className = SafeRead(header.klass, &classHeader, sizeof classHeader) ? Name(classHeader.nameId, classHeader.nameNumber) : "?";
     char text[160];
-    snprintf(text, sizeof text, "%s %s，序号 %d，标志 %#x", className.c_str(), Name(header.nameId, header.nameNumber).c_str(),
+    snprintf(text, sizeof text, "%s %s, index %d, flags %#x", className.c_str(), Name(header.nameId, header.nameNumber).c_str(),
              header.internalIndex, header.objectFlags);
     uint8_t raw[sizeof header];
     memcpy(raw, &header, sizeof raw);
-    return std::string(text) + "，原始 " + Hex(raw, sizeof raw);
+    return std::string(text) + ", raw " + Hex(raw, sizeof raw);
 }
 
 // FNameEntryAllocator { FRWLock Lock; uint32 CurrentBlock; uint32 CurrentByteCursor; uint8* Blocks[]; }
@@ -136,7 +136,7 @@ bool ObjectSystem::FindNamePool(const Image& image) {
             return false;
         }
         nameBlocks_ = slot;
-        Log("对象系统: 名字池 Blocks RVA %#zx，当前块 %u，块内游标 %#x", slot - image.base, cursor[0], cursor[1]);
+        Log("Objects: name pool Blocks RVA %#zx, current block %u, cursor %#x", slot - image.base, cursor[0], cursor[1]);
         return true;
     });
     return nameBlocks_ != 0;
@@ -188,28 +188,28 @@ bool ObjectSystem::FindObjectArray(const Image& image) {
                 objectArray_ = slot;
                 itemSize_ = layout.size;
                 itemPacked_ = layout.packed;
-                Log("对象系统: 对象表 RVA %#zx，%d 个对象（上限 %d），%d/%d 块，条目 %#zx 字节%s", slot - image.base,
+                Log("Objects: object table RVA %#zx, %d objects (capacity %d), %d/%d chunks, %#zx-byte items%s", slot - image.base,
                     header.numElements, header.maxElements, header.numChunks, header.maxChunks, layout.size,
-                    layout.packed ? "（压缩指针）" : "");
+                    layout.packed ? " (packed pointers)" : "");
                 return true;
             }
         }
 
         // The counters fit but the items do not: record what is there so the layout can be worked out.
         if (candidates++ < 4) {
-            Log("对象系统: 候选 RVA %#zx 计数吻合但条目不符（最多 %d/%d 个对上）：上限 %d，当前 %d，块 %d/%d，块表 %#zx，预分配 %#zx",
+            Log("Objects: candidate RVA %#zx has matching counts but its items do not fit (at best %d/%d): capacity %d, count %d, chunks %d/%d, chunk table %#zx, preallocated %#zx",
                 slot - image.base, bestMatching, kProbed, header.maxElements, header.numElements, header.numChunks,
                 header.maxChunks, header.chunks, header.preAllocated);
             uint8_t raw[0x60];
             if (chunkReadable && cache.Readable(firstChunk, sizeof raw) && SafeRead(firstChunk, raw, sizeof raw)) {
-                Log("  首块 %#zx: %s", firstChunk, Hex(raw, sizeof raw).c_str());
+                Log("  first chunk %#zx: %s", firstChunk, Hex(raw, sizeof raw).c_str());
                 for (size_t offset : {size_t{0}, size_t{0x18}, size_t{0x30}}) {
                     uintptr_t object;
                     memcpy(&object, raw + offset, sizeof object);
                     uint8_t body[0x40];
                     if (PlausibleHeapPointer(image, object) && cache.Readable(object, sizeof body) &&
                         SafeRead(object, body, sizeof body)) {
-                        Log("  条目 +%#zx -> %#zx: %s", offset, object, Hex(body, sizeof body).c_str());
+                        Log("  item +%#zx -> %#zx: %s", offset, object, Hex(body, sizeof body).c_str());
                     }
                 }
             }
@@ -221,7 +221,7 @@ bool ObjectSystem::FindObjectArray(const Image& image) {
     }
 
     // No counters of the stock shape. Look for the table by its contents alone and show what surrounds it.
-    Log("对象系统: 可写数据里没有形似对象表计数的位置，改为按内容查找");
+    Log("Objects: nothing in the writable data looks like the object table's counts; searching by content instead");
     ForEachWritableSlot(image, [&](uintptr_t slot, uintptr_t value) {
         uintptr_t firstChunk = 0;
         if (!PlausibleHeapPointer(image, value) || !cache.Readable(value, sizeof firstChunk) ||
@@ -248,8 +248,8 @@ bool ObjectSystem::FindObjectArray(const Image& image) {
             }
             uint8_t around[0x50] = {};
             SafeRead(slot - 0x20, around, sizeof around);
-            Log("对象系统: RVA %#zx 的内容是对象表（条目 %#zx 字节%s），但计数字段不是原版布局。前后内存: %s", slot - image.base,
-                layout.size, layout.packed ? "，压缩指针" : "", Hex(around, sizeof around).c_str());
+            Log("Objects: RVA %#zx holds the object table (%#zx-byte items%s) but its count fields are not laid out as in the stock engine. Memory around it: %s", slot - image.base,
+                layout.size, layout.packed ? ", packed pointers" : "", Hex(around, sizeof around).c_str());
             return true;
         }
         return false;
@@ -331,14 +331,14 @@ void ObjectSystem::FindPropertiesSizeOffset() {
         }
     }
     if (propertiesSizeOffset_) {
-        Log("对象系统: UClass 的对象大小字段在偏移 %#zx", propertiesSizeOffset_);
+        Log("Objects: UClass keeps its object size at offset %#zx", propertiesSizeOffset_);
     } else {
-        Log("对象系统: 没能确定 UClass 的对象大小字段（Class %#zx，Object %#zx，Field %#zx），对象大小改用相邻对象的间距估计", classClass,
+        Log("Objects: could not find where UClass keeps its object size (Class %#zx, Object %#zx, Field %#zx); sizes are estimated from the gaps between objects", classClass,
             objectClass, fieldClass);
         for (uintptr_t klass : {objectClass, fieldClass}) {
             uint8_t raw[0x40];
             for (size_t offset = sizeof(ObjectHeader); klass && offset < 0xE8 && SafeRead(klass + offset, raw, sizeof raw); offset += sizeof raw) {
-                Log("  类 %#zx +%#zx %s", klass, offset, Hex(raw, sizeof raw).c_str());
+                Log("  class %#zx +%#zx %s", klass, offset, Hex(raw, sizeof raw).c_str());
             }
         }
     }

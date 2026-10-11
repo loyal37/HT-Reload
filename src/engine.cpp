@@ -77,7 +77,7 @@ bool EngineCalls::Resolve(const Image& image, const ObjectSystem& system, std::s
         }
     }
     if (!rename) {
-        Append(report, "没找到 UObject::Rename");
+        Append(report, "UObject::Rename not found");
         return false;
     }
 
@@ -118,9 +118,9 @@ bool EngineCalls::Resolve(const Image& image, const ObjectSystem& system, std::s
     renameSlot = winner(renameVotes);
     processEventSlot = winner(processVotes);
     functionFlagsOffset = winner(offsetVotes);
-    Append(report, "UObject::Rename RVA %#zx，虚表第 %zu 项（%d 个抽样对象一致）", rename - image.base, renameSlot,
+    Append(report, "UObject::Rename RVA %#zx, vtable slot %zu (%d sampled objects agree)", rename - image.base, renameSlot,
            renameVotes.count(renameSlot) ? renameVotes[renameSlot] : 0);
-    Append(report, "UObject::ProcessEvent 虚表第 %zu 项（%d 个抽样对象一致），UFunction::FunctionFlags 偏移 %#zx", processEventSlot,
+    Append(report, "UObject::ProcessEvent vtable slot %zu (%d sampled objects agree), UFunction::FunctionFlags offset %#zx", processEventSlot,
            processVotes.count(processEventSlot) ? processVotes[processEventSlot] : 0, functionFlagsOffset);
     return Ready();
 }

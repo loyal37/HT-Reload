@@ -40,11 +40,11 @@ enum class SlotKind {
 
 const char* Label(SlotKind kind) {
     switch (kind) {
-        case SlotKind::LiveMeshComponent: return "[重设网格]";
-        case SlotKind::DynamicMaterial:   return "[换父材质]";
-        case SlotKind::Rewrite:           return "[改写]    ";
-        case SlotKind::Doubtful:          return "[存疑]    ";
-        default:                          return "[不动]    ";
+        case SlotKind::LiveMeshComponent: return "[reset mesh]";
+        case SlotKind::DynamicMaterial:   return "[reparent]  ";
+        case SlotKind::Rewrite:           return "[rewrite]   ";
+        case SlotKind::Doubtful:          return "[doubtful]  ";
+        default:                          return "[leave]     ";
     }
 }
 
@@ -256,7 +256,7 @@ ReloadWork PrepareWork(const ObjectSystem& system, const ObjectView& view, const
                               view.ClassName(slot.owner) + " " + view.Path(slot.owner) + offset + " -> " + view.ClassName(slot.target) +
                                   " " + view.Name(slot.target)});
         if (work.slots.back().kind == SlotKind::Doubtful) {
-            work.slots.back().outcome = "可能是名字";
+            work.slots.back().outcome = "may be a name";
         }
     }
     return work;
@@ -281,7 +281,7 @@ void Reloader::CallTest(std::string& report) {
         }
     }
     if (!function || !library || calls_.ParamsSize(function) != sizeof(int64_t)) {
-        Append(report, "试调用: 条件不满足（函数 %#zx，对象 %#zx，参数大小 %u）", function, library, calls_.ParamsSize(function));
+        Append(report, "Call test: preconditions not met (function %#zx, object %#zx, parameter size %u)", function, library, calls_.ParamsSize(function));
         return;
     }
     // int64 UKismetSystemLibrary::GetFrameCount(): no arguments, the return value is the whole parameter block.
@@ -290,8 +290,8 @@ void Reloader::CallTest(std::string& report) {
         DWORD exceptionCode = 0;
         bool called = false;
         bool ran = GameThread_RunAndWait([&] { called = CallProcessEvent(calls_, library, function, &frame, &exceptionCode); }, 10000);
-        Append(report, "试调用 GetFrameCount 第 %d 次: %s，返回 %lld，异常码 %#lx", round + 1,
-               !ran ? "游戏线程没有执行" : called ? "成功" : "引擎抛出异常", frame, exceptionCode);
+        Append(report, "Call test, GetFrameCount call %d: %s, returned %lld, exception code %#lx", round + 1,
+               !ran ? "the game thread did not run it" : called ? "ok" : "the engine raised an exception", frame, exceptionCode);
         Sleep(500);
     }
 }
@@ -327,7 +327,7 @@ void Reloader::RenameAndLoad(const std::string& assetName, std::string& report) 
     }
     uintptr_t loadAsset = FindFunction(objects_, view.All(), "KismetSystemLibrary", "LoadAsset_Blocking");
     if (asset < 0 || !library || !loadAsset || calls_.ParamsSize(loadAsset) != sizeof(LoadAssetParams)) {
-        Append(report, "条件不满足（资产 %d，库对象 %#zx，函数 %#zx，参数大小 %#x）", asset, library, loadAsset, calls_.ParamsSize(loadAsset));
+        Append(report, "Preconditions not met (asset %d, library object %#zx, function %#zx, parameter size %#x)", asset, library, loadAsset, calls_.ParamsSize(loadAsset));
         return;
     }
 
@@ -359,44 +359,44 @@ void Reloader::RenameAndLoad(const std::string& assetName, std::string& report) 
         },
         60000);
 
-    Append(report, "旧资产 %#zx，旧包 %#zx %s", oldAsset, oldPackage, packageName.c_str());
+    Append(report, "Old asset %#zx, old package %#zx %s", oldAsset, oldPackage, packageName.c_str());
     if (!ran) {
-        Append(report, "游戏线程没有执行");
+        Append(report, "the game thread did not run it");
         return;
     }
-    Append(report, "改名: %s，返回 %d，异常码 %#lx", renameCalled ? "已调用" : "引擎抛出异常", renamed, renameException);
-    Append(report, "加载: %s，返回对象 %#zx，异常码 %#lx", loadCalled ? "已调用" : "未调用或引擎抛出异常", params.returnValue, loadException);
+    Append(report, "Rename: %s, returned %d, exception code %#lx", renameCalled ? "called" : "the engine raised an exception", renamed, renameException);
+    Append(report, "Load: %s, returned object %#zx, exception code %#lx", loadCalled ? "called" : "not called, or the engine raised an exception", params.returnValue, loadException);
 
     ObjectView after(objects_);
     int32_t oldPackageNow = after.IndexOf(oldPackage);
     int32_t loaded = after.IndexOf(params.returnValue);
-    Append(report, "旧包现在叫: %s", after.Name(oldPackageNow).c_str());
-    Append(report, "旧资产现在是: %s %s", after.ClassName(after.IndexOf(oldAsset)).c_str(), after.Path(after.IndexOf(oldAsset)).c_str());
-    Append(report, "新加载的对象: %s %s%s", after.ClassName(loaded).c_str(), after.Path(loaded).c_str(),
-           params.returnValue == oldAsset ? "（和旧资产是同一个，没有重新加载）" : "");
+    Append(report, "The old package is now named: %s", after.Name(oldPackageNow).c_str());
+    Append(report, "The old asset is now: %s %s", after.ClassName(after.IndexOf(oldAsset)).c_str(), after.Path(after.IndexOf(oldAsset)).c_str());
+    Append(report, "Newly loaded object: %s %s%s", after.ClassName(loaded).c_str(), after.Path(loaded).c_str(),
+           params.returnValue == oldAsset ? " (the same object as the old asset: it was not loaded again)" : "");
 }
 
 void Reloader::Plan(const std::vector<uint64_t>& packageIds, std::string& report) {
     ObjectView view(objects_);
     Superseded set = FindSuperseded(view, packageIds, true);
     ReloadWork work = PrepareWork(objects_, view, set);
-    Append(report, "新包里的包 %zu 个，其中已加载 %zu 个，旧对象共 %zu 个，其他对象里指向它们的槽位 %zu 处", packageIds.size(),
+    Append(report, "%zu packages in the new containers, %zu of them loaded, %zu old objects, %zu slots in other objects pointing at them", packageIds.size(),
            set.packages.size(), set.objects.size(), set.slots.size());
     size_t nameLike = 0;
     for (int32_t object : set.objects) {
         nameLike += ReadsAsName(objects_, view[object].address);
     }
-    Append(report, "其中 %zu 个旧对象的地址同时也是一个名字的编号，指向它们的槽位只认类里声明过的对象引用", nameLike);
+    Append(report, "%zu old objects have an address that also reads as a name id; a slot pointing at one of them counts only where the class declares an object reference", nameLike);
 
-    Append(report, "---- 第一步: 给这些旧包改名 ----");
+    Append(report, "---- Step 1: rename these old packages ----");
     for (const ReloadWork::Package& package : work.packages) {
         Append(report, "%#zx  %s", package.address, package.name.c_str());
     }
-    Append(report, "---- 第二步: 重新加载这些资产（包里的顶层公开对象）----");
+    Append(report, "---- Step 2: load these assets again (the public top-level objects of the packages) ----");
     for (const ReloadWork::Asset& asset : work.assets) {
         Append(report, "%#zx  %s", asset.oldAddress, asset.label.c_str());
     }
-    Append(report, "---- 第三步: 处理指向旧对象的槽位 ----");
+    Append(report, "---- Step 3: deal with the slots that point at old objects ----");
     for (const ReloadWork::Slot& slot : work.slots) {
         Append(report, "%s  %s", Label(slot.kind), slot.label.c_str());
     }
@@ -410,7 +410,7 @@ ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::stri
     Superseded set = FindSuperseded(view, packageIds, true);
     ReloadWork work = PrepareWork(objects_, view, set);
     if (work.packages.empty()) {
-        Append(report, "这些包当前都没有被加载，不需要重载");
+        Append(report, "None of these packages is loaded; nothing to reload");
         return ReloadResult::Nothing;
     }
 
@@ -425,7 +425,7 @@ ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::stri
     uintptr_t copyOverrides = FindFunction(objects_, view.All(), "MaterialInstanceDynamic", "CopyParameterOverrides");
     if (work.assets.empty() || !library || calls_.ParamsSize(loadAsset) != sizeof(LoadAssetParams) ||
         calls_.ParamsSize(setMesh) != sizeof(uintptr_t) || calls_.ParamsSize(copyOverrides) != sizeof(uintptr_t)) {
-        Append(report, "条件不满足: 旧包 %zu 个，资产 %zu 个，库对象 %#zx，加载 %#zx，设网格 %#zx，材质同步 %#zx", work.packages.size(),
+        Append(report, "Preconditions not met: %zu old packages, %zu assets, library object %#zx, load %#zx, set mesh %#zx, material sync %#zx", work.packages.size(),
                work.assets.size(), library, loadAsset, setMesh, copyOverrides);
         return ReloadResult::Failed;
     }
@@ -445,12 +445,12 @@ ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::stri
             for (ReloadWork::Package& package : work.packages) {
                 if (!CallRename(calls_, package.address, package.retiredName.c_str(), &package.renamed, &exceptionCode) ||
                     !package.renamed) {
-                    stopped = "改名";
+                    stopped = "rename";
                     return;
                 }
             }
             for (ReloadWork::Asset& asset : work.assets) {
-                if (!call(library, loadAsset, &asset.params, "加载")) {
+                if (!call(library, loadAsset, &asset.params, "load")) {
                     return;
                 }
             }
@@ -466,12 +466,12 @@ ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::stri
                 }
                 uintptr_t loaded = replacement(slot);
                 if (slot.kind == SlotKind::Rewrite) {
-                    slot.outcome = !loaded ? "没有对应的新资产" : ReplacePointer(slot.location, slot.oldTarget, loaded) ? "已改写" : "内容已变，未改";
+                    slot.outcome = !loaded ? "no new asset for it" : ReplacePointer(slot.location, slot.oldTarget, loaded) ? "rewritten" : "changed meanwhile, left alone";
                 } else if (slot.kind == SlotKind::DynamicMaterial) {
                     if (!loaded || !ReplacePointer(slot.location, slot.oldTarget, loaded)) {
-                        slot.outcome = "未改";
-                    } else if (call(slot.owner, copyOverrides, &loaded, "材质同步")) {
-                        slot.outcome = "已换父材质";
+                        slot.outcome = "left alone";
+                    } else if (call(slot.owner, copyOverrides, &loaded, "material sync")) {
+                        slot.outcome = "reparented";
                     }
                 }
             }
@@ -483,11 +483,11 @@ ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::stri
                     continue;
                 }
                 if (slot.owner == lastComponent) {
-                    slot.outcome = "同上";
+                    slot.outcome = "as above";
                 } else if (!loaded) {
-                    slot.outcome = "没有对应的新资产";
-                } else if (call(slot.owner, setMesh, &loaded, "重设网格")) {
-                    slot.outcome = "已重设";
+                    slot.outcome = "no new asset for it";
+                } else if (call(slot.owner, setMesh, &loaded, "mesh reset")) {
+                    slot.outcome = "reset";
                     lastComponent = slot.owner;
                 }
             }
@@ -496,14 +496,14 @@ ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::stri
             for (ReloadWork::Slot& slot : work.slots) {
                 uintptr_t loaded = replacement(slot);
                 if (!stopped && slot.kind == SlotKind::LiveMeshComponent && loaded && ReplacePointer(slot.location, slot.oldTarget, loaded)) {
-                    slot.outcome = "重设后仍是旧值，已改写";
+                    slot.outcome = "still old after the reset, rewritten";
                 }
             }
         },
         120000);
 
     if (!ran) {
-        Append(report, "游戏线程没有执行");
+        Append(report, "the game thread did not run it");
         return ReloadResult::Failed;
     }
     size_t renamed = 0;
@@ -514,17 +514,17 @@ ReloadResult Reloader::Reload(const std::vector<uint64_t>& packageIds, std::stri
     for (const ReloadWork::Asset& asset : work.assets) {
         loaded += asset.params.returnValue && asset.params.returnValue != asset.oldAddress;
     }
-    Append(report, "改名 %zu/%zu 个包，重新加载出新对象 %zu/%zu 个", renamed, work.packages.size(), loaded, work.assets.size());
+    Append(report, "Renamed %zu/%zu packages, loaded %zu/%zu new objects", renamed, work.packages.size(), loaded, work.assets.size());
     if (stopped) {
-        Append(report, "中止于“%s”，异常码 %#lx。之后的步骤没有执行", stopped, exceptionCode);
+        Append(report, "Stopped at \"%s\", exception code %#lx. The steps after it were not carried out", stopped, exceptionCode);
     }
     for (const ReloadWork::Asset& asset : work.assets) {
         if (!asset.params.returnValue || asset.params.returnValue == asset.oldAddress) {
-            Append(report, "没有加载出新对象: %s（返回 %#zx）", asset.label.c_str(), asset.params.returnValue);
+            Append(report, "No new object loaded: %s (returned %#zx)", asset.label.c_str(), asset.params.returnValue);
         }
     }
     for (const ReloadWork::Slot& slot : work.slots) {
-        Append(report, "%s %-12s %s", Label(slot.kind), slot.outcome, slot.label.c_str());
+        Append(report, "%s %-36s %s", Label(slot.kind), slot.outcome, slot.label.c_str());
     }
     return stopped ? ReloadResult::Failed : ReloadResult::Done;
 }
