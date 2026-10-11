@@ -25,7 +25,7 @@ To disable it, rename or delete `HTReload.asi`.
 1. Change the mod and package it. **While the game is open the name has to be new**: an increasing number before `_P`, for example `blackbird_1_P`, `blackbird_2_P`. Files of the same name are held by the game and cannot be overwritten.
 2. Put the new `.pak`, `.utoc` and `.ucas` into the mod's folder below `HT\Content\Paks`.
 3. Within a few seconds two rising tones say that the new pak is mounted, and a third, higher tone right after them says that the reload is done and the game shows the new version. The game stands still for a moment during a reload, longer for more packages.
-4. If the third tone is low, the reload did not complete; the details are in `Win64\HTReload.reload.txt`. Returning to the login screen and entering the game again still brings the new version in.
+4. A high tone followed by a lower one means the reload ran to the end but left some asset or reference as it was; a single low tone means it did not complete. Either way the details are in `Win64\HTReload.reload.txt`, and returning to the login screen and entering the game again still brings the new version in.
 
 A higher number means a higher priority, so a new version always wins over an older one.
 
@@ -39,11 +39,12 @@ Do not drop a new pak in while the game shows a loading screen or changes scenes
 
 ## Known limits
 
-- A mod that only replaces materials or textures and uses a mesh of the game misses some references (pointers stored in arrays are not rewritten yet). A mod that brings its mesh, materials and textures does not have this problem.
+- References are followed through object bodies and through array properties. References held in maps or sets, or in arrays nested inside other containers, are not found; an asset that is only reachable that way keeps its old version in use, and the reload reports itself as partly done or leaves the old version mounted.
+- A mod may replace assets of the game in place, such as a texture at its original path. The game's material instances that use it are then reloaded along with it. A texture that a base material (not an instance) refers to directly is not handled.
+- When a new mesh uses a different material in a slot, the override material the game made for that slot follows it. The outline material the game pairs with it does not.
 - After a reload, some material slots of the character on the field are no longer dynamic materials, so effects such as hit flashes or dissolves may differ on those parts from a fresh entry. Returning to the login screen and entering again restores them.
 - Instances of a mod's own widgets or blueprint classes that exist at that moment stay instances of the old class.
-- The high tone means that no step was aborted, not that every single reference was replaced; the report lists anything that was left.
-- Verified only on the client build of October 2026, with one character mod.
+- Verified only on the client build of October 2026, with two character mods.
 
 ## Build, test, deploy
 
@@ -67,7 +68,7 @@ Write a file `HTReload.cmd.txt` into the game's `Win64` folder, one command per 
 - `unmount`: unmounts those mod paks by hand and deletes their files.
 - `gc [seconds]`: requests garbage collections for that long.
 - `probe <label> [filter]`: reports the loaded objects that belong to those mod paks and who still references them, appended to `HTReload.probe.txt`.
-- `objects`, `obj`, `mem`, `vtable`, `code`, `strref`, `astrref`, `callers`, `names`, `refs`, `functions`, `props`: read-only views into the engine, described in `src\explore.h`.
+- `objects`, `obj`, `mem`, `vtable`, `code`, `strref`, `astrref`, `callers`, `names`, `refs`, `arrayrefs`, `functions`, `props`: read-only views into the engine, described in `src\explore.h`.
 
 ## How it works
 
@@ -79,7 +80,7 @@ Write a file `HTReload.cmd.txt` into the game's `Win64` folder, one command per 
   1. The package ids are read from the new pak's `.utoc` and matched against the engine's object table to find the old packages of the same names that are loaded.
   2. The old packages are renamed. When the loader finds a loaded package renamed, it drops its record, which allows a package of that name to be loaded again.
   3. The assets of each package are loaded again, now from the new pak, which has the highest priority.
-  4. Pointers to old assets in other objects are replaced: plain data is rewritten; a dynamic material keeps its object and gets the new parent; a skeletal mesh component on the field is reset through the engine's "set mesh" function, so that the engine rebuilds its render state and anim instances.
+  4. Pointers to old assets in other objects and in their array properties are replaced: plain data is rewritten; a dynamic material keeps its object and gets the new parent; a skeletal mesh component on the field is reset through the engine's "set mesh" function, so that the engine rebuilds its render state and anim instances, and its override materials are made to follow the slots of the new mesh. A material instance of the game that refers to a replaced asset is not patched but reloaded together with it, which rebuilds its render state.
   5. Garbage collections are requested, which removes the old objects.
 - Steps 2 to 4 run in one task on the game thread.
 - Unmounting: when the old objects are collected, the engine's own handler of `FCoreDelegates::OnUnmountPak` is called on the game thread, and the engine closes the files of the old container; once they are confirmed to be let go, they are deleted.

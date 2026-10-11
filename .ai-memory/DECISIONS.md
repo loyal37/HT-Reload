@@ -183,3 +183,25 @@
 - Because deleting cannot be undone, a guard was added with it: the container that supersedes must not have been mounted before the one it supersedes. Otherwise a new pak published with too low a number would be unmounted and deleted as an old version. Such a pak now only gets a note in the log.
 - Not done: the recycle bin (the user said to delete directly, and at about 360 MB a version the recycle bin would not free the space either); a switch.
 - Affected: `src/main.cpp`, `test/host.cpp`, `test/run.ps1`, README.
+
+## 2026-10-11 - A material instance that refers to a reloaded asset is reloaded, not patched
+
+- Decision: when a material instance from a package refers to a superseded asset (its parent, or a texture in its parameter arrays), its package joins the set that is renamed and loaded again. Only where that is not possible, or beyond 64 such packages, is the pointer rewritten in place.
+- Reason: the render thread works from a copy of the instance's parameters that is made when the instance is initialised. Rewriting the pointer on the game thread would leave that copy on the old texture, and no script function re-initialises a constant material instance. Loading it again does, with the engine's own code, and uses only operations already proven in the game.
+- Alternatives: call `PostLoad` on the instance a second time through its vtable; find `InitResources` natively.
+- Why not: the first relies on a function that is not meant to run twice; the second has no anchor to locate it by.
+- Limit: only instances, not base materials, and only what the array walk finds.
+- Affected: `Gather` in `src/reload.cpp`, `FindSuperseded` in `src/probe.cpp`.
+
+## 2026-10-11 - Override materials follow the change between two meshes, not the state of one
+
+- Decision: after a mesh reset, an override is moved only in slots where the new mesh's material differs from the old mesh's, and only if the override is that old material or a dynamic material derived from it.
+- Reason: the game, or a mod's blueprint, may put an override into a slot on purpose (toggles, effects). Forcing every override to match the mesh would undo that. Comparing the two meshes singles out what the new version changed.
+- Cost: an override that is already out of step is not corrected by a later reload.
+- Affected: `followSlots` in `Reloader::Reload`.
+
+## 2026-10-11 - Members of property subclasses are found by content
+
+- Decision: the offsets of `FArrayProperty::Inner` and `FStructProperty::Struct` are not written down; they are found at run time from two properties every UE game has (`MeshComponent.OverrideMaterials`, `SkeletalMesh.Materials`).
+- Reason: same as for the entry points: the game's engine is modified and updates often.
+- Affected: `src/reflect.cpp`.

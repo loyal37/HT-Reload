@@ -216,3 +216,19 @@
 - README and the seven memory files were rewritten. PROJECT_OVERVIEW also lost a stale list of things "not done" that had since been done.
 - The shell changed with this, so it can only be deployed with the game closed. It was: shell and core 0.7.2 were copied into the game folder with the game closed (hashes in CURRENT_STATE). Neither has run in the game yet.
 - The notes of the releases `v0.6.2` and `v0.7.1` on GitHub were rewritten to match; their attachments are unchanged. Commit `e7edffe`.
+
+## 2026-10-11 - Git identity corrected
+
+- The user asked why GitHub shows no contributor for what they push from VS Code. The global git email was `loyal37@github.com`, which no account is linked to; the packager's repository had `loyal37@users.noreply.github.com` set locally and showed the account correctly.
+- At the user's request the global email was changed to `loyal37@users.noreply.github.com`. Earlier commits keep the old address; rewriting history was offered and not asked for.
+
+## 2026-10-11 - The FADIA test, and core 0.8.0
+
+- The user tested another mod, FADIA: first the original model, then some faces deleted (reload worked), then one slot given another material (no effect); the old versions were not cleaned up either time.
+- Shell and core 0.7.2 ran in the game for the first time in that session, without trouble.
+- Looked into it in the running game with the inspection commands; findings are in CURRENT_STATE. In short: the mod's textures replace textures of the game in place and are referenced from array storage, which was not followed; and the component's per-slot override materials outlive a mesh reset.
+- Core 0.8.0: `reflect.{h,cpp}`, the array walk, dependent material instances, `ArrayKind`, slot materials following a changed mesh, `ReloadResult::Partial`, the command `arrayrefs`. `FindSuperseded` takes further packages to treat as superseded.
+- Checked in the game, read-only: the layout of array and struct properties was found; `arrayrefs` on the old `_d` texture named `MI_player_039_fadia_a` and `outline_039_cloth`, `TextureParameterValues`, field +0x10; `plan FADIA` ran in 1.6 seconds.
+- `test\run.ps1` passed; the stand-in host has no reflection data, so the new paths are not exercised there.
+- Commit `c619c5e`, pushed; core swapped into the running game. No reload has run with it yet.
+- Next: the user restarts the game and publishes a new version.

@@ -3,15 +3,26 @@
 ## HT Reload (2026-10-11)
 
 - **The complete in-place reload works in the game, and the user confirmed seeing the result.** After a new version is published, mesh, materials, textures and anim blueprint are replaced without a return to login, the old objects are all collected, and the older version is unmounted and deleted.
-- **Deployed in the game folder: shell and core 0.7.2**, in `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`, copied on 2026-10-11 with the game closed:
-  - shell `HTReload.asi`, SHA256 `BBE39E1BC28EA920C6BAB4D6ADBA91CD299127AF76AACF726A8214903122309A`
-  - core `HTReload.core.dll`, SHA256 `226C039F75A6028990588A8A9804549C5E1CDE5061EC82B49EDB5D1F415AE61B`
-  - **Neither has run in the game yet.** 0.7.2 differs from 0.7.1 only in the wording of log and report messages, and the stand-in test passed, but the shell binary is new, so the next start of the game is its first run. What to check in the log: `Shell: started`, `Located:`, `Unmount: HandleUnmountPakDelegate`, `Ready:`.
+- **Deployed in the game folder: shell 0.7.2 and core 0.8.0**, in `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`:
+  - shell `HTReload.asi`, SHA256 `BBE39E1BC28EA920C6BAB4D6ADBA91CD299127AF76AACF726A8214903122309A`, copied on 2026-10-11 with the game closed. It ran in the game from 12:31 that day without trouble: located, unmount handler found, ready, two mounts and reloads.
+  - core `HTReload.core.dll` 0.8.0, SHA256 `9CC3F19E2D4A09FBCA074CA13405CADDD6A7663A299429B33E664884D70EEAFE`, swapped into the running game at 13:04 on 2026-10-11.
+  - **Core 0.8.0 has only run read-only commands in the game** (`plan`, `arrayrefs`). Its new write paths are untested there; see TASKS.
 - Release `v0.7.1` is the latest on GitHub (published 2026-10-10 18:42 at the user's request), pointing at `07d9329`, with `HTReload-0.7.1.zip` (shell `0F2CB234…`, core `6403822D…`, README). `v0.6.2` (`f22f629`) is still there. Nothing newer than 0.7.1 has been released.
 - git: `origin` = `https://github.com/loyal37/HT-Reload`, **public** (seen through `gh` on 2026-10-10; the record before that said private, and the visibility was changed by the user, not by the assistant). Whatever is pushed, `.ai-memory` included, is visible to everyone.
-- Latest code commit: `3716259` (core 0.7.2), followed by the commit that rewrote README and memory.
+- Latest code commit: `c619c5e` (core 0.8.0).
 - **Rule from the user: commit after every round of changes.** See the standing constraints in PROJECT_OVERVIEW.
-- The mod folder currently holds `blackbird_6_P` only (packaged 2026-10-10 19:12 with the packager's automatic numbering).
+- The git identity on this machine was corrected on 2026-10-11 at the user's request: the global email had been `loyal37@github.com`, which GitHub links to no account, and is now `loyal37@users.noreply.github.com`. Commits before `c619c5e` in this repository carry the old address and show no contributor.
+- Mod folders: `Blackbird Judgment Bunny 1.1` holds `blackbird_6_P`; `FADIA` holds `FADIA_1_P`, `FADIA_2_P` and `FADIA_3_P` (none of them unmounted, see below).
+
+## The FADIA test of 2026-10-11 (core 0.7.2, run started 12:31, PID 27288)
+
+The FADIA mod has 4 packages: the skeletal mesh `player_039_fadia_skin` and three textures `T_player_039_fadia_01_m/_d/_id`, all at the game's own paths under `/Game/Characters/Player/039_fadia/`. It uses the game's materials.
+
+- `FADIA_2_P` (some faces deleted): 4/4 packages renamed and loaded; the mesh changed visibly. But the three old texture packages were never collected and the old version was not unmounted.
+- `FADIA_3_P` (slot 2 changed from `MI_player_039_fadia_b` to `MI_player_039_fadia_a`): only 1/1 package was found loaded, the mesh. No visible change, and again nothing unmounted.
+- Cause of the first: the textures are referenced from the texture parameter arrays of the game's material instances (`MI_player_039_fadia_a` and the outline material `outline_039_cloth` for the `_d` texture). References in array storage were not followed, so the old textures stayed in use under their renamed packages and the new copies, referenced by nobody, were collected. That is also why the second reload found only the mesh.
+- Cause of the second: the component holds an override material for each of its 14 slots, a dynamic material made from the mesh's material at character setup (`MID_MI_player_039_fadia_b_…` for slot 2), and an override wins over the mesh's own material. Unlike with the Blackbird mod, nothing rebuilt these after the mesh reset; there the mod's own anim blueprint appears to have done that.
+- Both are addressed in core 0.8.0. That session itself cannot be repaired by another reload.
 
 ## What was verified in the game on 2026-10-10
 
@@ -73,8 +84,7 @@ Write operations in the run started 17:19 (PID 37696), all successful:
 
 ## Next step
 
-1. On the next start of the game, read the log to confirm that shell and core 0.7.2 come up as before.
-2. Tighten the verdict of a reload (see TASKS) once the user says who is to do it.
-3. If the user finds effects wrong on the body, deal with the two body1 slots that have no dynamic material (`PrimitiveComponent.CreateDynamicMaterialInstance` after the mesh reset could add them, once it is clear whether the game's own bookkeeping accepts them).
+1. The user restarts the game and publishes a new FADIA version; read `HTReload.log` and `HTReload.reload.txt` to verify core 0.8.0 (what to look for is in TASKS).
+2. If the user finds effects wrong on the body, deal with the two body1 slots that have no dynamic material (`PrimitiveComponent.CreateDynamicMaterialInstance` after the mesh reset could add them, once it is clear whether the game's own bookkeeping accepts them).
 
 Commands are sent with `tools\ask.ps1`; `tools\disasm.ps1` disassembles the bytes that the `code` command returns.

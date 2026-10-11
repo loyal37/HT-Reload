@@ -1,11 +1,21 @@
 # Known Issues
 
-## A reload reports success even when it only partly took effect
+## Core 0.8.0 has not carried out a reload in the game yet
 
-- Symptom: `Reloader::Reload` returns `Done` whenever no step was aborted. An asset that produced no new object, or a slot that was not replaced (no new asset for its target, or marked doubtful), is listed in the report but does not change the result, so the high tone and "the new version is live" can follow a partial reload.
-- Impact: only the verdict. Unmounting and deleting an old version is gated separately on every renamed package having been collected, so a reference that was left behind keeps the old version in place.
-- So far every reload in the game was complete (26/26 packages and assets, every slot replaced).
-- To do: a third result for "partly done", reported as such, and a final line after the collection window saying whether every old object went away.
+- The new parts that write (reloading dependent material instances, setting override materials and texture parameters through the engine, moving an override after a mesh reset) have only been compiled and planned. In the game, `plan` and `arrayrefs` ran read-only and found what was expected; no reload has run with this core.
+- The first publish after it is the first real run.
+
+## A reload can only see what it can find
+
+- Since core 0.8.0 a reload that ran to its end but left an asset or a reference as it was returns `Partial` and is reported as such, instead of as done.
+- That covers what the reload found and could not settle. A reference it does not find at all (in a map or set, or in an array nested in another container) is not counted; it shows afterwards as renamed packages that are not collected, and as old versions that stay mounted.
+- Still to do: a final line after the collection window saying whether every old object went away.
+
+## Override materials follow a mesh only across a reload
+
+- When a new mesh uses a different material in a slot, the override the game made for that slot is moved to it (since core 0.8.0). The comparison is between the mesh before and after the reload, so an override that was already out of step, for instance from a reload done by an older core, stays as it is until the character is set up again (return to login).
+- The outline material the game pairs with a dynamic material (the dynamic material points at it at +0x178) is not changed; it keeps the outline of the slot's former material.
+- An override that is not derived from the slot's former material is left alone and noted in the report; it may be something the game or a mod's blueprint put there on purpose.
 
 ## Two body material slots have no dynamic material after a reload
 
@@ -20,11 +30,11 @@
 - Impact: none in practice for the Blackbird mod, because the game replaces those dynamic materials when the mesh is reset. A mod without its own mesh may show a brief visual difference.
 - Cause: this is the only way found to trigger `InitResources()` from a script function and so push the new parent to the render thread.
 
-## References outside object bodies are not rewritten
+## Only some references outside object bodies are followed
 
-- Symptom: a reload only rewrites pointer slots inside the bodies of other objects. Pointers to old assets in the heap storage of a `TArray` or `TMap` are left.
-- Impact: none for the Blackbird mod (after each reload all old objects were collected, so no strong reference was missed). A mod that only replaces materials or textures and uses a mesh of the game is affected: the mesh's material array is on the heap, and the old materials stay in use.
-- Possible fix: walk container properties through reflection.
+- Before core 0.8.0 a reload only rewrote pointer slots inside the bodies of other objects. It showed with the FADIA mod on 2026-10-11, which replaces three textures of the game at their original paths: the game's material instances hold them in their texture parameter arrays, so the old textures stayed in use, the new copies were collected for lack of a referrer, and the old versions were never unmounted.
+- Since core 0.8.0 the top-level array properties of every object are walked through reflection (see ARCHITECTURE).
+- Not followed: maps and sets; arrays nested inside structs that are themselves in containers; arrays that are members of a struct property; a base material (`Material`, not an instance) that refers to a texture.
 
 ## Slots are found by value, so other data can be taken for a pointer
 

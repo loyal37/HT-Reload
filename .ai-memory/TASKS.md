@@ -2,14 +2,18 @@
 
 ## In Progress
 
-- None.
+- Verify core 0.8.0 in the game.
+  - Files: `src/reflect.cpp`, `src/reload.cpp` (`Gather`, `PrepareWork`, `Reloader::Reload`).
+  - Done when: after a restart of the game, publishing a new FADIA version in which a slot uses another material shows the change; the log names the slot that followed; the textures' packages are reloaded together with the material instances that use them; all renamed packages are collected and the older versions are unmounted and deleted.
+  - State: committed as `c619c5e` and running in the game since 13:04 on 2026-10-11. Only read-only commands have run with it.
+  - Needs: the user to restart the game first. In the session that was running, the old textures are in use under renamed packages and a slot override is already out of step, which a further reload does not repair.
 
 ## Next
 
-- Tighten the verdict of a reload: a third result for "partly done" and a final line after the collection window on whether every old object went away (see KNOWN_ISSUES). Raised by a review on 2026-10-10; the user has not said who is to do it.
+- A final line after the collection window on whether every old object went away (see KNOWN_ISSUES).
 - The packager's automatic numbering is done (see Completed). The commit is local to the packager's repository and not pushed; waiting for the user.
 - Two body material slots have no dynamic material after a reload (see KNOWN_ISSUES). Decide once the user reports whether anything is visibly wrong.
-- References outside object bodies (the heap storage of `TArray` and `TMap`) are not rewritten. The Blackbird mod is not affected, since whatever references its assets is either inside the pack or a pointer in an object body. A mod that only replaces materials or textures and uses a mesh of the game is affected (the mesh's material array is on the heap). Needs a walk over container properties through reflection.
+- References in maps, sets and nested arrays are still not followed (top-level arrays are, since core 0.8.0).
 - A reload after a blueprint change (an added toggle, for example) has not been tried. Expected to work when the panel is closed while publishing; the user was told what to watch for.
 
 ## Pending
@@ -33,4 +37,5 @@
 - 2026-10-10: core 0.7.0, old containers that are superseded are unmounted after a reload. Succeeded in the game (at 18:24 `blackbird_4_P`, mounted at startup, was unmounted); the user confirmed the files could be deleted. Commit `5bd5e1c`.
 - 2026-10-10: core 0.7.1, the old three files are deleted right after the unmount. Succeeded in the game (at 18:41 `blackbird_4_P` was unmounted and deleted). Commit `61c63ed`. Release `v0.7.1` published.
 - 2026-10-10: the packager (a separate repository, `D:\Neverness to Everness Mod Loader\cook\packager`, `loyal37/NTE-Mod-Packager`) got "automatic numbering" in 2.6. Local commit `de16cb0`, not pushed.
-- 2026-10-11: core 0.7.2, log and report messages reworded; README and project memory rewritten. Commit `3716259` and the one after it.
+- 2026-10-11: core 0.7.2, log and report messages reworded; README and project memory rewritten. Commit `3716259` and the one after it. Shell and core 0.7.2 ran in the game without trouble (run started 12:31).
+- 2026-10-11: core 0.8.0, references in array properties, dependent material instances reloaded along, override materials following a changed mesh, the `Partial` result. Commit `c619c5e`. Not yet verified in the game.

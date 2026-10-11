@@ -73,7 +73,7 @@ The code is only unpacked while the game starts, and the delegate is only bound 
 
 ## In-place reload (core 0.6.x, verified in the game on 2026-10-10)
 
-- Entry: `Reloader::Reload(package ids, report)`, which returns `Nothing` (none of the packages is loaded), `Done` or `Failed`. `Watcher::ReloadMounted` calls it after a successful mount; the command `reload [filter]` triggers it by hand. `plan [filter]` only lists what would be done and changes nothing.
+- Entry: `Reloader::Reload(package ids, report)`, which returns `Nothing` (none of the packages is loaded), `Done`, `Partial` (since 0.8.0) or `Failed`. `Watcher::ReloadMounted` calls it after a successful mount; the command `reload [filter]` triggers it by hand. `plan [filter]` only lists what would be done and changes nothing.
 - Preparation (worker thread, read-only): `FindSuperseded` finds the loaded packages the new container covers, every object inside them, and the slots in the bodies of other objects that point at those objects; `PrepareWork` works out everything that is to be done.
   - The assets to load are the public objects directly inside the packages, class default objects excepted.
   - Slot classification (`Classify`):
@@ -92,6 +92,16 @@ The code is only unpacked while the game starts, and the delegate is only bound 
 - If the engine raises an exception at any step, the reload stops there and the report says where, with the exception code.
 - Reports: an automatic reload writes `Win64\HTReload.reload.txt` and its summary lines go to the log (prefix `Reload:`); the report of a manual command is in `HTReload.out.txt`.
 - Sounds: two rising tones for a successful mount; one more, higher, when the reload is done; one low tone when the reload did not complete or the mount failed.
+
+## Array references, dependent materials, slot materials (core 0.8.0)
+
+- `reflect.{h,cpp}`: `Reflection` reads `UStruct` / `FField` / `FProperty`. The members that subclasses of `FProperty` add are found by content rather than by fixed offsets: `FArrayProperty::Inner` is the pointer, between 0x48 and 0xC0 of `MeshComponent.OverrideMaterials`, to a property of the same name that holds objects; `FStructProperty::Struct` is the pointer in the inner property of `SkeletalMesh.Materials` that equals the script struct `SkeletalMaterial`.
+- `ArraysOf(class)` lists, cached per class, the top-level array properties of a class and its parents whose elements hold object references: arrays of object pointers, and arrays of structs with object pointers in them (nested structs up to three levels). `FindArrayReferences(targets)` walks those arrays for every object outside the target set, about 390,000 objects in the game, in well under a second.
+- `Gather` in `reload.cpp` widens the superseded set: a material instance from a `/Game/` package (not a dynamic one) that refers to a superseded asset, through a slot in its body or through an array, has its package added to the set, and the search runs again, for up to 8 rounds and 64 such packages. The reason: a material instance's render state is built when it is loaded and cannot be brought up to date from script, so it is reloaded as a whole. Such packages are loaded from the game's own containers; their imports resolve to the new assets because every rename happens before any load.
+- Array references that remain are classified (`ArrayKind`): an override material of a live mesh component is set with `PrimitiveComponent.SetMaterial`; a texture parameter of a dynamic material with `MaterialInstanceDynamic.SetTextureParameterValueByInfo` (the 0x10-byte `ParameterInfo` is copied from the element); anything else has the pointer in the element rewritten. On the game thread the array is read again and every element that still holds the old object is dealt with, so a reallocation between planning and execution does no harm.
+- Following slot materials: after `SetSkeletalMeshAsset` on a live component, the materials of the old and the new mesh are compared slot by slot (`SkeletalMesh.Materials`, stride `sizeof(FSkeletalMaterial)`, field `MaterialInterface`). Where the new mesh uses a different material, and not merely the reloaded copy of the old one, the component's override for that slot is moved: a plain override equal to the old material is set to the new one; a dynamic material whose `Parent` is the old material is reparented. Any other override is left and noted. The rule works on the change between two meshes, so an override that was already out of step before a reload is not corrected.
+- `ReloadResult::Partial`: the run reached its end but an asset produced no new object, or a slot or array element that was not marked "leave" was not settled. The watcher logs it and plays a high tone followed by a lower one.
+- Measured in the game (2026-10-11): `SkeletalMesh.Materials` at +0x1b0 with 0x30-byte elements; texture parameter elements are 0x18 bytes with the texture at +0x10; a component's `OverrideMaterials` at +0x548.
 
 ## Unmounting and deleting old containers (unmount in core 0.7.0, delete in 0.7.1)
 
