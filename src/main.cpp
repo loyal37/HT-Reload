@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.8.0";
+const char kVersion[] = "0.8.1";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -529,13 +529,22 @@ private:
         if (!unmountCheckAt_ || now < unmountCheckAt_) {
             return;
         }
-        std::string report;
-        if (!UnmountShadowed(report) && now < unmountGiveUpAt_) {
+        size_t retired = EnsureObjects() ? reloader_.RetiredPackagesAlive() : 0;
+        if (retired && now < unmountGiveUpAt_) {
             unmountCheckAt_ = now + 5000;
             return;
         }
         unmountCheckAt_ = 0;
+        std::string report;
+        UnmountShadowed(report);
         LogReport("Unmount", report);
+        // Old assets that outlive the collections are still referenced from somewhere the reload did not reach.
+        if (retired) {
+            std::string leftover;
+            reloader_.ReportRetired(leftover);
+            WriteWholeFile(paths_.moduleDir / L"HTReload.leftover.txt", leftover);
+            Log("%zu old packages are still alive; what refers to their assets is listed in HTReload.leftover.txt", retired);
+        }
     }
 
     // Instructions dropped into HTReload.cmd.txt next to the plugin, one per line. Answers go to
@@ -549,6 +558,7 @@ private:
     //   reload [filter]         WRITES: replace the loaded assets of those containers by fresh copies
     //   shadowed                list the mounted mod containers that a newer version has made redundant
     //   unmount                 WRITES: have the engine unmount those containers and DELETE their files
+    //   leftover                list the old assets that are still alive after a reload and what refers to them
     void RunCommands() {
         fs::path path = paths_.moduleDir / L"HTReload.cmd.txt";
         std::error_code error;
@@ -630,6 +640,8 @@ private:
             answers += "Old packages still alive: " + std::to_string(reloader_.RetiredPackagesAlive()) + "\r\n";
         } else if (command == "unmount") {
             UnmountShadowed(answers);
+        } else if (command == "leftover") {
+            reloader_.ReportRetired(answers);
         } else if (!Explore(command, arguments, *image_, *objects_, answers)) {
             answers += "Unknown command\r\n";
         }

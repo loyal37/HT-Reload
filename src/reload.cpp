@@ -477,6 +477,37 @@ size_t Reloader::RetiredPackagesAlive() const {
     return alive;
 }
 
+void Reloader::ReportRetired(std::string& report) const {
+    constexpr size_t kMaxListed = 8;
+    ObjectView view(objects_);
+    // The objects directly inside the renamed packages: the old assets themselves.
+    std::vector<int32_t> assets;
+    for (size_t i = 0; i < view.All().size(); ++i) {
+        int32_t package = view.IndexOf(view.All()[i].outer);
+        if (package >= 0 && view[package].outer == 0 && view.Name(package).find(kRetiredMark) != std::string::npos) {
+            assets.push_back(static_cast<int32_t>(i));
+        }
+    }
+    Append(report, "%zu old assets are still alive in renamed packages", assets.size());
+    if (assets.size() > kMaxListed) {
+        Append(report, "The first %zu are looked at", kMaxListed);
+        assets.resize(kMaxListed);
+    }
+    Reflection reflection(objects_, view);
+    std::vector<ArrayReference> arrays = reflection.FindArrayReferences(assets);
+    for (int32_t asset : assets) {
+        Append(report, "==== %s %s", view.ClassName(asset).c_str(), view.Path(asset).c_str());
+        for (const ArrayReference& reference : arrays) {
+            if (reference.target == asset) {
+                Append(report, "in an array: %s %s  %s[%u]+%#x", view.ClassName(reference.owner).c_str(), view.Path(reference.owner).c_str(),
+                       reference.property.c_str(), reference.index, reference.fieldOffset);
+            }
+        }
+        Append(report, "every slot that holds its address:");
+        ReportReferences(objects_, view[asset].address, report);
+    }
+}
+
 void Reloader::RenameAndLoad(const std::string& assetName, std::string& report) {
     if (!calls_.Ready() && !Resolve(report)) {
         return;

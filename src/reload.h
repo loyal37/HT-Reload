@@ -41,6 +41,9 @@ public:
     // assets have all been collected. Read-only.
     size_t RetiredPackagesAlive() const;
 
+    // Lists the assets of those packages together with what still refers to them. Read-only.
+    void ReportRetired(std::string& report) const;
+
     // Changes engine state: renames the loaded package that holds the asset `assetName` and loads the
     // asset again. Nothing is repointed, so the game keeps using the old copy; this only proves that
     // the two copies can exist side by side.
