@@ -40,3 +40,4 @@
 - 2026-10-11: core 0.7.2, log and report messages reworded; README and project memory rewritten. Commit `3716259` and the one after it. Shell and core 0.7.2 ran in the game without trouble (run started 12:31).
 - 2026-10-11: core 0.8.0, references in array properties, dependent material instances reloaded along, override materials following a changed mesh, the `Partial` result. Commit `c619c5e`. The reload worked in the game at 15:09; cleaning up the old version did not.
 - 2026-10-11: core 0.8.1, the leftover report. Commit `2f49348`.
+- 2026-10-11: release `v0.8.1` published.

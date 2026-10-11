@@ -238,3 +238,8 @@
 - The user restarted, published `FADIA_3_P` again with a slot using another material, and reported it as fine. The log agrees for the reload (see CURRENT_STATE) but also shows 4 old packages never collected and the old version left mounted. The user had closed the game by then.
 - The user asked whether their toggle blueprint and panel reload. Answered from what the Blackbird reloads showed, and said what is untested; see CURRENT_STATE.
 - Core 0.8.1: `Reloader::ReportRetired`, `HTReload.leftover.txt` written when renamed packages outlive the collection window, the command `leftover`. `test\run.ps1` passed. Commit `2f49348`, pushed, deployed with the game closed.
+
+## 2026-10-11 - Release v0.8.1
+
+- The user asked for a release. The game had not run since 15:09, so core 0.8.1 was still untested in it; the release went ahead with that stated in the notes, together with the open problem of old packages staying alive.
+- `gh release create v0.8.1`, pointing at `5fffcd3`; the binaries in `HTReload-0.8.1.zip` were compared by hash with the deployed ones first. Notes source: `build\release\notes-0.8.1.md` (not tracked).
