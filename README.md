@@ -66,6 +66,7 @@ Write a file `HTReload.cmd.txt` into the game's `Win64` folder, one command per 
 - `reload [filter]`: reloads those mod paks by hand.
 - `shadowed`: lists the mod paks that a newer version fully supersedes and that could be unmounted, without changing anything.
 - `unmount`: unmounts those mod paks by hand and deletes their files.
+- `leftover`: lists the old assets that are still alive after a reload and what still refers to them. The same list is written to `HTReload.leftover.txt` by itself when old assets outlive a reload.
 - `gc [seconds]`: requests garbage collections for that long.
 - `probe <label> [filter]`: reports the loaded objects that belong to those mod paks and who still references them, appended to `HTReload.probe.txt`.
 - `objects`, `obj`, `mem`, `vtable`, `code`, `strref`, `astrref`, `callers`, `names`, `refs`, `arrayrefs`, `functions`, `props`: read-only views into the engine, described in `src\explore.h`.

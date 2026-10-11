@@ -230,5 +230,11 @@
 - Core 0.8.0: `reflect.{h,cpp}`, the array walk, dependent material instances, `ArrayKind`, slot materials following a changed mesh, `ReloadResult::Partial`, the command `arrayrefs`. `FindSuperseded` takes further packages to treat as superseded.
 - Checked in the game, read-only: the layout of array and struct properties was found; `arrayrefs` on the old `_d` texture named `MI_player_039_fadia_a` and `outline_039_cloth`, `TextureParameterValues`, field +0x10; `plan FADIA` ran in 1.6 seconds.
 - `test\run.ps1` passed; the stand-in host has no reflection data, so the new paths are not exercised there.
-- Commit `c619c5e`, pushed; core swapped into the running game. No reload has run with it yet.
-- Next: the user restarts the game and publishes a new version.
+- Commit `c619c5e`, pushed; core swapped into the running game.
+
+## 2026-10-11 - Core 0.8.0 in the game; the leftover report
+
+- The user asked what kinds of assets the remaining gap (maps, sets, nested arrays) concerns. Answered from the stock UE 5.6 source, the game being closed: animation sequences inside montages, textures used directly by a base material, assets used by Niagara effects, layers of layered materials, rows of data tables and lookup tables of the game, assets pinned by the asset manager.
+- The user restarted, published `FADIA_3_P` again with a slot using another material, and reported it as fine. The log agrees for the reload (see CURRENT_STATE) but also shows 4 old packages never collected and the old version left mounted. The user had closed the game by then.
+- The user asked whether their toggle blueprint and panel reload. Answered from what the Blackbird reloads showed, and said what is untested; see CURRENT_STATE.
+- Core 0.8.1: `Reloader::ReportRetired`, `HTReload.leftover.txt` written when renamed packages outlive the collection window, the command `leftover`. `test\run.ps1` passed. Commit `2f49348`, pushed, deployed with the game closed.

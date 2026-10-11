@@ -1,15 +1,15 @@
 # Known Issues
 
-## Core 0.8.0 has not carried out a reload in the game yet
+## Old FADIA packages stay alive after a reload
 
-- The new parts that write (reloading dependent material instances, setting override materials and texture parameters through the engine, moving an override after a mesh reset) have only been compiled and planned. In the game, `plan` and `arrayrefs` ran read-only and found what was expected; no reload has run with this core.
-- The first publish after it is the first real run.
+- Seen on 2026-10-11 at 15:09 with core 0.8.0: the reload completed and looked right, yet 4 renamed packages were not collected and the older version stayed mounted.
+- Not diagnosed; the game was closed first. One lead from the earlier session: a third heap location held the old `_d` texture besides the two texture parameter arrays, inside elements that look like 0x28-byte records with a GUID, which the array walk did not attribute to any property.
+- Core 0.8.1 writes `HTReload.leftover.txt` when this happens: the old assets and everything that still refers to them.
 
 ## A reload can only see what it can find
 
 - Since core 0.8.0 a reload that ran to its end but left an asset or a reference as it was returns `Partial` and is reported as such, instead of as done.
-- That covers what the reload found and could not settle. A reference it does not find at all (in a map or set, or in an array nested in another container) is not counted; it shows afterwards as renamed packages that are not collected, and as old versions that stay mounted.
-- Still to do: a final line after the collection window saying whether every old object went away.
+- That covers what the reload found and could not settle. A reference it does not find at all (in a map or set, or in an array nested in another container) is not counted; it shows afterwards as renamed packages that are not collected, and as old versions that stay mounted. Since core 0.8.1 that case is logged with a pointer to `HTReload.leftover.txt`.
 
 ## Override materials follow a mesh only across a reload
 
