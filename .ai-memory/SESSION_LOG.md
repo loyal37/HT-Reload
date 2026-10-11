@@ -214,4 +214,5 @@
 
 - Core 0.7.2: the log and report messages in `shell/shell.cpp` and seven files under `src/` were reworded; `test/run.ps1` and `tools/ask.ps1` now look for `Ready:` and `Command done:`. `test\run.ps1` passed. Commit `3716259`.
 - README and the seven memory files were rewritten. PROJECT_OVERVIEW also lost a stale list of things "not done" that had since been done.
-- The shell changed with this, so it can only be deployed with the game closed.
+- The shell changed with this, so it can only be deployed with the game closed. It was: shell and core 0.7.2 were copied into the game folder with the game closed (hashes in CURRENT_STATE). Neither has run in the game yet.
+- The notes of the releases `v0.6.2` and `v0.7.1` on GitHub were rewritten to match; their attachments are unchanged. Commit `e7edffe`.
