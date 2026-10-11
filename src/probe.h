@@ -19,13 +19,15 @@ struct ReferenceSlot {
     int32_t target;  // index into the view
 };
 
-// What a mod container supersedes among the loaded objects.
+// What a mod container supersedes among the loaded objects. `alsoPackages` are further packages
+// (indices into the view) to treat the same way although the container does not hold them.
 struct Superseded {
-    std::vector<int32_t> packages;     // loaded packages the container also holds
+    std::vector<int32_t> packages;     // loaded packages the container also holds, and `alsoPackages`
     std::vector<int32_t> objects;      // everything inside those packages, the packages included
     std::vector<ReferenceSlot> slots;  // filled when `findSlots` is set
 };
-Superseded FindSuperseded(const ObjectView& view, const std::vector<uint64_t>& packageIds, bool findSlots);
+Superseded FindSuperseded(const ObjectView& view, const std::vector<uint64_t>& packageIds, const std::vector<int32_t>& alsoPackages,
+                          bool findSlots);
 
 // Lists every engine-owned slot that holds `target`: the object it lies in, or the surrounding memory.
 void ReportReferences(const ObjectSystem& objects, uintptr_t target, std::string& out);

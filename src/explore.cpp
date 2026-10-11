@@ -11,6 +11,7 @@
 
 #include "log.h"
 #include "probe.h"
+#include "reflect.h"
 
 namespace {
 
@@ -281,6 +282,22 @@ bool Explore(const std::string& command, const std::string& arguments, const Ima
         }
     } else if (command == "refs") {
         ReportReferences(system, number, out);
+    } else if (command == "arrayrefs") {
+        ObjectView view(system);
+        Reflection reflection(system, view);
+        int32_t target = view.IndexOf(number);
+        if (!reflection.Ready()) {
+            Append(out, "the layout of array properties could not be worked out");
+        } else if (target < 0) {
+            Append(out, "%#zx is not an object in the object table", number);
+        } else {
+            std::vector<ArrayReference> references = reflection.FindArrayReferences({target});
+            for (const ArrayReference& reference : references) {
+                Append(out, "%s %s  %s[%u]+%#x", view.ClassName(reference.owner).c_str(), view.Path(reference.owner).c_str(),
+                       reference.property.c_str(), reference.index, reference.fieldOffset);
+            }
+            Append(out, "%zu in total", references.size());
+        }
     } else if (command == "functions") {
         ObjectView view(system);
         for (size_t i = 0; i < view.All().size(); ++i) {

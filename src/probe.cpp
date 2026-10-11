@@ -209,13 +209,16 @@ uint64_t PackageIdFromName(const std::string& name) {
     return CityHash64(reinterpret_cast<const char*>(wide.data()), wide.size() * sizeof(wchar_t));
 }
 
-Superseded FindSuperseded(const ObjectView& view, const std::vector<uint64_t>& packageIds, bool findSlots) {
+Superseded FindSuperseded(const ObjectView& view, const std::vector<uint64_t>& packageIds, const std::vector<int32_t>& alsoPackages,
+                          bool findSlots) {
     Superseded result;
     const ArenaVector<ObjectInfo>& objects = view.All();
     std::vector<uint8_t> superseded(objects.size(), 0);
     for (size_t i = 0; i < objects.size(); ++i) {
         int32_t index = static_cast<int32_t>(i);
-        if (objects[i].outer == 0 && std::binary_search(packageIds.begin(), packageIds.end(), PackageIdFromName(view.Name(index)))) {
+        if (objects[i].outer == 0 &&
+            (std::find(alsoPackages.begin(), alsoPackages.end(), index) != alsoPackages.end() ||
+             std::binary_search(packageIds.begin(), packageIds.end(), PackageIdFromName(view.Name(index))))) {
             superseded[i] = 1;
             result.packages.push_back(index);
         }

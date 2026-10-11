@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char kVersion[] = "0.7.2";
+const char kVersion[] = "0.8.0";
 
 const CoreHost* g_host = nullptr;
 // Copied in CoreStart: the shell advances its own count as soon as CoreStart returns.
@@ -360,6 +360,11 @@ private:
             Log("Reload done, the new version is live");
             Beep(2000, 200);
             window = 20000;  // the old assets are unreferenced now and go with the next collection
+        } else if (result == ReloadResult::Partial) {
+            Log("Reload partly done: some of the old assets are still in use, details are in HTReload.reload.txt");
+            Beep(2000, 120);
+            Beep(900, 250);
+            window = 20000;
         } else if (result == ReloadResult::Failed) {
             Log("Reload not completed, details are in HTReload.reload.txt. Returning to the login screen and entering again brings the new version in");
             Beep(400, 400);

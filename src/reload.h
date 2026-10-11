@@ -15,7 +15,8 @@
 // afresh, point everything that used the old assets at the new ones, and let the old ones be collected.
 enum class ReloadResult {
     Nothing,  // none of the packages is loaded, so there was nothing to replace
-    Done,
+    Done,     // every asset was loaded again and every reference found was moved to the new one
+    Partial,  // ran to the end, but some asset or reference was left as it was; the report lists them
     Failed,   // not attempted, or stopped part-way; the report says where
 };
 
