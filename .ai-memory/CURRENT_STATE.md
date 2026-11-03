@@ -3,7 +3,7 @@
 ## HT Reload (2026-10-11)
 
 - **The complete in-place reload works in the game, and the user confirmed seeing the result.** After a new version is published, mesh, materials, textures and anim blueprint are replaced without a return to login, the old objects are all collected, and the older version is unmounted and deleted.
-- **Deployed in the game folder: shell 0.7.2 and core 0.8.1**, in `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`:
+- **Deployed in the game folder: shell 0.7.2 and core 0.8.1**, in `F:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`:
   - shell `HTReload.asi`, SHA256 `BBE39E1BC28EA920C6BAB4D6ADBA91CD299127AF76AACF726A8214903122309A`, copied on 2026-10-11 with the game closed; in use since.
   - core `HTReload.core.dll` 0.8.1, SHA256 `A524026F4B0AA55008D1504C517460E1009DACF12235BD99A8CC2CF3B766C217`, copied at 17:35 on 2026-10-11 with the game closed. It adds the leftover report to 0.8.0 and has not run in the game yet.
 - **Core 0.8.0 carried out a reload in the game** (run started 15:07 on 2026-10-11), with the FADIA mod and a slot that changed its material:

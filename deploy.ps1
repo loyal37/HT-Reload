@@ -2,7 +2,7 @@
 # The core can be replaced while the game runs: the shell notices and swaps it in. The shell itself
 # is locked by the running game, so a changed shell needs the game closed.
 # Keep this file ASCII: Windows PowerShell 5.1 reads BOM-less scripts in the system code page.
-param([string]$GameWin64 = 'D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64')
+param([string]$GameWin64 = 'F:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64')
 
 $ErrorActionPreference = 'Stop'
 $build = Join-Path $PSScriptRoot 'build'

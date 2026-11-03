@@ -27,7 +27,7 @@ The project's author, for iterating on character mods of their own. It is not me
 ## Environment
 
 - Development directory: `E:\HT Reload`, remote repository `loyal37/HT-Reload` (created by the user; private at first, public since 2026-10-10)
-- Game directory: `D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`
+- Game directory: `F:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64`
 - Game engine: a modified UE 5.6; the stock source is on this machine at `D:\ue\UE_5.6` and is used to check engine behaviour
 - ASI loader: `dsound.dll` in the game's Win64 folder is Ultimate ASI Loader x64 9.7.1; it loads `.asi` files from Win64 and `Win64\plugins`
 - Other ASI files there: `plugins\UniversalSigBypasser.asi` (pak signature patch, the reason mods mount at all) and `Anticensor.asi` (a near-camera fade patch, unrelated to paks)

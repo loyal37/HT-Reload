@@ -3,7 +3,7 @@
 # Keep this file ASCII: Windows PowerShell 5.1 reads BOM-less scripts in the system code page.
 param(
     [Parameter(Mandatory)][string[]]$Lines,
-    [string]$GameWin64 = 'D:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64',
+    [string]$GameWin64 = 'F:\Neverness To Everness\Client\WindowsNoEditor\HT\Binaries\Win64',
     [int]$TimeoutSeconds = 120
 )
 

@@ -243,3 +243,12 @@
 
 - The user asked for a release. The game had not run since 15:09, so core 0.8.1 was still untested in it; the release went ahead with that stated in the notes, together with the open problem of old packages staying alive.
 - `gh release create v0.8.1`, pointing at `5fffcd3`; the binaries in `HTReload-0.8.1.zip` were compared by hash with the deployed ones first. Notes source: `build\release\notes-0.8.1.md` (not tracked).
+
+## 2026-11-03 - The game moved to drive F
+
+- The user reinstalled the game to `F:\Neverness To Everness` (the install on D is gone) and found that mods no longer loaded.
+- Cause: the new `Win64` had `dsound.dll` and `Anticensor.asi` (whose log showed the loader working) but no `plugins` folder, so `UniversalSigBypasser.asi` was missing and the engine refused every unsigned mod pak.
+- Restored it from `D:\Neverness to Everness Mod Loader\plugins\UniversalSigBypasser.asi` (same size and date as the one the old install had; SHA256 `1374AC9E894E45E802F983958599B7C396B11D2CF8FAC9B4556BAC73D453798B`) into `Win64\plugins`.
+- `deploy.ps1` and `tools\ask.ps1` now default to the game folder on F; shell and core 0.8.1 were deployed there with the game closed (same hashes as before).
+- Not yet checked: that the bypass finds its pattern in the freshly installed build (`plugins\SigBypasser.log` after the next start).
+- The packager's saved output directory still points at the old path on D.
